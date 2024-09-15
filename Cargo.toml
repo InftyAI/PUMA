@@ -2,5 +2,7 @@
 name = "puma-rs"
 version = "0.0.1"
 edition = "2021"
+description = "Triton-based inference engine focused on lightweight, high-performance for Serverless."
+license = "Apache-2.0"
 
 [dependencies]
