@@ -2,7 +2,7 @@
 name = "puma"
 version = "0.0.1"
 edition = "2021"
-description = "Triton-based inference engine focused on lightweight, high-performance for Serverless."
+description = "A lightweight, high-performance inference engine for heterogeneous devices."
 license = "Apache-2.0"
 
 [dependencies]
