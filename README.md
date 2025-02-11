@@ -1,6 +1,6 @@
 # PUMA
 
-Puma is a lightweight, high-performance inference engine for heterogeneous devices. *Still under active development.*
+Puma aims to be a lightweight, high-performance inference engine for heterogeneous devices. *Currently under active development.*
 
 ## Supported Backends
 
