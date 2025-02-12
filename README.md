@@ -1,6 +1,18 @@
 # PUMA
 
-Puma is a lightweight, high-performance inference engine for heterogeneous devices. *Still under active development.*
+Puma aims to be a lightweight, high-performance inference engine for heterogeneous devices. *Currently under active development.*
+
+## How to Run
+
+### Build
+
+Run `make build` to build the **puma** binary.
+
+### Run
+
+Run `./puma help` to see all available commands.
+
+For example, you can run `./puma version` to see the binary version.
 
 ## Supported Backends
 

@@ -6,3 +6,6 @@ description = "A lightweight, high-performance inference engine for heterogeneou
 license = "Apache-2.0"
 
 [dependencies]
+
+clap = { version = "4.5.28", features = ["derive"] }
+prettytable-rs = "0.10"
