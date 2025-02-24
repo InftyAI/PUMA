@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use indicatif::{MultiProgress, ProgressStyle};
 use log::{error, info};
 use reqwest::Client;
 use serde::Deserialize;
@@ -20,6 +21,12 @@ struct OllamaResponse {
     #[serde(rename = "schemaVersion")]
     schema_version: u32,
     layers: Vec<Layer>,
+}
+
+impl OllamaResponse {
+    fn total_size(&self) -> u64 {
+        return self.layers.iter().map(|l| l.size).sum();
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -44,7 +51,10 @@ impl OllamaDownloader {
     }
 
     pub async fn download_model(&self, path: &str) -> Result<(), DownloadError> {
-        info!("Downloading model from ollama provider...");
+        info!(
+            "Downloading model {} from ollama provider...",
+            self.model_name
+        );
 
         let start_time = std::time::Instant::now();
 
@@ -61,6 +71,14 @@ impl OllamaDownloader {
         let mut tasks = Vec::new();
         let semaphore = Arc::new(Semaphore::new(MAX_FILE_CONCURRENCY));
 
+        let m = MultiProgress::new();
+        let sty = ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes}  {msg}")
+            .unwrap()
+            .progress_chars("##-");
+
+        let arc_m = Arc::new(m);
+
         for layer in resp.layers {
             let layer_url = format!(
                 "https://registry.ollama.ai/v2/library/{}/blobs/{}",
@@ -69,21 +87,33 @@ impl OllamaDownloader {
 
             let client: Arc<Client> = Arc::clone(&client);
             let semaphore: Arc<Semaphore> = Arc::clone(&semaphore);
+            let arc_m = Arc::clone(&arc_m);
 
             let full_path = format!("{}/{}", path, layer.path());
             let size = layer.size;
+            let sty = sty.clone();
 
             let task = tokio::spawn(async move {
                 let _permit = semaphore.acquire().await.unwrap();
-                let _ = request::download_file(client, layer_url.clone(), size, full_path)
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            "Failed to download file from {}: {}",
-                            layer_url,
-                            e.to_string()
-                        );
-                    });
+                // TODO: return the error.
+                let _ = request::download_file(
+                    client,
+                    layer_url.clone(),
+                    size,
+                    layer.path().to_string(),
+                    full_path,
+                    arc_m,
+                    sty.clone(),
+                )
+                .await
+                .map_err(|e| {
+                    error!(
+                        "Failed to download file {} from {}: {}",
+                        layer.path(),
+                        layer_url,
+                        e.to_string()
+                    );
+                });
             });
             tasks.push(task);
         }
@@ -94,7 +124,7 @@ impl OllamaDownloader {
 
         let elapsed_time = start_time.elapsed();
         info!(
-            "Download model {} takes {:.2?}.",
+            "Download model {} totally takes {:.2?}.",
             self.model_name, elapsed_time,
         );
         Ok(())
@@ -102,6 +132,8 @@ impl OllamaDownloader {
 }
 
 async fn query_manifest(client: &Client, url: &str) -> Result<OllamaResponse, DownloadError> {
+    info!("Querying the manifest...");
+
     let response = client.get(url).send().await.map_err(|e| {
         DownloadError::RequestError(format!(
             "failed to query the manifest, error: {}",

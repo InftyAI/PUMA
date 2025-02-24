@@ -4,21 +4,25 @@ use std::io;
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info};
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
 const MAX_CHUNK_CONCURRENCY: usize = 100;
-const CHUNK_SIZE: usize = 1000 * 1000 * 100; // 100MB
-const MAX_RETRIES: usize = 3;
+const CHUNK_SIZE: usize = 1000 * 1000 * 10; // 10MB
+const MAX_RETRIES: usize = 5;
 
 pub async fn download_file(
     client: Arc<Client>,
     url: String,
     content_length: u64,
+    filename: String,
     output_path: String,
+    m: Arc<MultiProgress>,
+    sty: ProgressStyle,
 ) -> Result<(), Box<dyn Error>> {
-    debug!("Start to download file {} to {}", url, output_path);
+    debug!("Start to download file {} to {}", filename, output_path);
 
     let mut tasks = Vec::new();
     let mut start = 0;
@@ -30,23 +34,33 @@ pub async fn download_file(
     let file = Arc::new(File::create(&output_path)?);
     let arc_url = Arc::new(url);
 
+    let pb = m.add(ProgressBar::new(content_length).with_style(sty));
+    pb.set_message(filename.clone());
+    let arc_pb = Arc::new(pb);
+
     while start < content_length {
         let client = Arc::clone(&client);
         let semaphore = Arc::clone(&semaphore);
         let file = Arc::clone(&file);
         let url = Arc::clone(&arc_url);
+        let pb = Arc::clone(&arc_pb);
+
+        let fname = filename.clone();
 
         let task = tokio::spawn(async move {
             let _permit = semaphore.acquire().await.unwrap();
             let _ = download_chunk_with_retries(
                 client,
                 file,
+                fname,
                 url,
                 start.clone(),
                 end.clone(),
                 MAX_RETRIES,
             )
             .await;
+
+            pb.inc(end - start + 1);
         });
         tasks.push(task);
 
@@ -59,18 +73,23 @@ pub async fn download_file(
         // TODO: write to a file about the chunk info.
     }
 
+    arc_pb.finish();
     Ok(())
 }
 
 async fn download_chunk_with_retries(
     client: Arc<Client>,
     file: Arc<File>,
+    filename: String,
     url: Arc<String>,
     start: u64,
     end: u64,
     retries: usize,
 ) -> Result<(), Box<dyn Error>> {
-    debug!("Start to download chunk {} from {} to {}", url, start, end,);
+    debug!(
+        "Start to download file chunk {} from {} to {}",
+        filename, start, end,
+    );
 
     let mut retries = retries;
     loop {
