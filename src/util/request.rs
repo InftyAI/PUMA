@@ -1,3 +1,4 @@
+use core::time;
 use std::error::Error;
 use std::fs::File;
 use std::io;
@@ -5,13 +6,14 @@ use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::{debug, error, info};
+use log::{debug, error};
 use reqwest::Client;
 use tokio::sync::Semaphore;
 
-const MAX_CHUNK_CONCURRENCY: usize = 100;
-const CHUNK_SIZE: usize = 1000 * 1000 * 10; // 10MB
+const MAX_CHUNK_CONCURRENCY: usize = 20;
+const CHUNK_SIZE: usize = 1000 * 1000 * 50; // 50MB
 const MAX_RETRIES: usize = 5;
+const SLEEP_FACTOR: usize = 500; // 500 ms
 
 pub async fn download_file(
     client: Arc<Client>,
@@ -86,37 +88,39 @@ async fn download_chunk_with_retries(
     end: u64,
     retries: usize,
 ) -> Result<(), Box<dyn Error>> {
-    debug!(
-        "Start to download file chunk {} from {} to {}",
-        filename, start, end,
-    );
+    debug!("Start to download chunk {}:{}-{}", filename, start, end,);
 
     let mut retries = retries;
     loop {
         match download_chunk(&client, &file, &url, start, end).await {
             Ok(_) => {
-                debug!(
-                    "Download chunk {} from {} to {} successfully.",
-                    url, start, end
-                );
+                debug!("Download chunk {}:{}-{} successfully", filename, start, end);
                 break;
             }
             // TODO: retry only when http error.
             Err(e) => {
                 if retries == 0 {
-                    error!("Reach the maximum retries {}, return.", MAX_RETRIES);
+                    error!("Reach the maximum retries {}. Return", MAX_RETRIES);
                     return Err(e);
                 }
                 retries -= 1;
-                // TODO: sleep for a while
-                info!(
-                    "Failed to download chunk {}, retrying {}...",
+
+                let _ = tokio::time::sleep(time::Duration::from_millis(
+                    SLEEP_FACTOR as u64 * 2u64.pow((MAX_RETRIES - retries) as u32),
+                ));
+
+                error!(
+                    "Failed to download chunk {}:{}-{}, err: {}, retrying {}...",
+                    filename,
+                    start,
+                    end,
                     e.to_string(),
-                    retries
+                    MAX_RETRIES - retries
                 );
             }
         }
     }
+
     Ok(())
 }
 

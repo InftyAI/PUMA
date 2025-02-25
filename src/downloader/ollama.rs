@@ -124,7 +124,7 @@ impl OllamaDownloader {
 
         let elapsed_time = start_time.elapsed();
         info!(
-            "Download model {} totally takes {:.2?}.",
+            "Download model {} totally takes {:.2?}",
             self.model_name, elapsed_time,
         );
         Ok(())
