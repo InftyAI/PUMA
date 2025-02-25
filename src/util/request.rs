@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -20,11 +21,15 @@ pub async fn download_file(
     url: String,
     content_length: u64,
     filename: String,
-    output_path: String,
+    output_path: &PathBuf,
     m: Arc<MultiProgress>,
     sty: ProgressStyle,
 ) -> Result<(), Box<dyn Error>> {
-    debug!("Start to download file {} to {}", filename, output_path);
+    debug!(
+        "Start to download file {} to {}",
+        filename,
+        output_path.display()
+    );
 
     let mut tasks = Vec::new();
     let mut start = 0;
