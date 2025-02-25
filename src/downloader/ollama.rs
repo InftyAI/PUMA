@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressStyle};
@@ -50,7 +51,7 @@ impl OllamaDownloader {
         }
     }
 
-    pub async fn download_model(&self, path: &str) -> Result<(), DownloadError> {
+    pub async fn download_model(&self, path: &PathBuf) -> Result<(), DownloadError> {
         info!(
             "Downloading model {} from ollama provider...",
             self.model_name
@@ -89,7 +90,7 @@ impl OllamaDownloader {
             let semaphore: Arc<Semaphore> = Arc::clone(&semaphore);
             let arc_m = Arc::clone(&arc_m);
 
-            let full_path = format!("{}/{}", path, layer.path());
+            let full_path = path.join(layer.path());
             let size = layer.size;
             let sty = sty.clone();
 
@@ -98,19 +99,18 @@ impl OllamaDownloader {
                 // TODO: return the error.
                 let _ = request::download_file(
                     client,
-                    layer_url.clone(),
+                    layer_url,
                     size,
                     layer.path().to_string(),
-                    full_path,
+                    &full_path,
                     arc_m,
                     sty.clone(),
                 )
                 .await
                 .map_err(|e| {
                     error!(
-                        "Failed to download file {} from {}: {}",
+                        "Failed to download file {}: {}",
                         layer.path(),
-                        layer_url,
                         e.to_string()
                     );
                 });

@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
 
 use crate::downloader::ollama::OllamaDownloader;
+use crate::util::file;
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -105,9 +106,9 @@ pub async fn run(cli: Cli) {
             }
             Provider::Ollama => {
                 let d = OllamaDownloader::new(&args.model);
-                d.download_model("/Users/kerthcet/Workspaces/InftyAI/puma/tmp")
-                    .await
-                    .unwrap();
+                let model_path = file::root_home().join(file::model_folder_name(&args.model));
+                file::create_folder_if_not_exists(&model_path).unwrap();
+                d.download_model(&model_path).await.unwrap();
             }
             Provider::Modelscope => {
                 println!("Downloading model from Modelscope...");
