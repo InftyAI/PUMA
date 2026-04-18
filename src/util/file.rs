@@ -8,10 +8,6 @@ pub fn create_folder_if_not_exists(folder_path: &PathBuf) -> std::io::Result<()>
     Ok(())
 }
 
-pub fn model_folder_name(model_name: &str) -> String {
-    model_name.replace(":", "--").replace("/", "--")
-}
-
 pub fn root_home() -> PathBuf {
     let home = home_dir().expect("Failed to get home directory");
     home.join(".puma")
