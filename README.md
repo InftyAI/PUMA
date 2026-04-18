@@ -1,6 +1,6 @@
 # PUMA
 
-Puma aims to be a lightweight, high-performance inference engine for heterogeneous devices. *Currently under active development.*
+**PUMA** aims to be a lightweight, high-performance inference engine for local AI. Play for fun.
 
 ## How to Run
 

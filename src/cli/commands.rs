@@ -1,9 +1,6 @@
 use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
 
-use crate::downloader::ollama::OllamaDownloader;
-use crate::util::file;
-
 #[derive(Parser)]
 #[command(name = "PUMA")]
 #[command(about = "PUMA CLI")]
@@ -14,24 +11,22 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List running inference services
+    /// List running models
     PS,
     /// List local models
     LS,
     /// Download a model from a model provider
     PULL(PullArgs),
-    /// Create and run a new inference service from a model
+    /// Create and run a new model
     RUN,
-    /// Stop one running inference service
+    /// Stop one running model
     STOP,
     /// Remove one model
     RM,
     /// Display system-wide information
     INFO,
-    /// Return detailed information about inference service
+    /// Return detailed information about a model
     INSPECT,
-    /// Return detailed information about model
-    SHOW,
     /// Returns the version of PUMA.
     VERSION,
 }
@@ -47,7 +42,6 @@ struct PullArgs {
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum Provider {
     Huggingface,
-    Ollama,
     Modelscope,
 }
 
@@ -71,14 +65,6 @@ pub async fn run(cli: Cli) {
                 "Running",
                 "8m",
             ]);
-            table.add_row(row!["llama3-8b", "ollama", "llama3.1:8b", "Running", "2d",]);
-            table.add_row(row![
-                "llama3-70b",
-                "ollama",
-                "llama3.1:70b",
-                "Downloading",
-                "10s",
-            ]);
 
             table.printstd();
         }
@@ -86,17 +72,14 @@ pub async fn run(cli: Cli) {
         Commands::LS => {
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_CLEAN);
-            table.add_row(row!["NAME", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
+            table.add_row(row!["MODEl", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
             table.add_row(row![
                 "deepseek-ai/DeepSeek-R1",
                 "huggingface",
                 "main",
-                "2 weeks ago",
-                "800GB"
+                "80GB",
+                "2 weeks ago"
             ]);
-            table.add_row(row!["llama3.1", "ollama", "8b", "2 weeks ago", "4.9GB"]);
-            table.add_row(row!["llama3.1", "ollama", "70b", "2 weeks ago", "43GB"]);
-            table.add_row(row!["llama3.1", "ollama", "405b", "2 weeks ago", "243GB"]);
             table.printstd();
         }
 
@@ -104,23 +87,17 @@ pub async fn run(cli: Cli) {
             Provider::Huggingface => {
                 println!("Downloading model from Huggingface...");
             }
-            Provider::Ollama => {
-                let d = OllamaDownloader::new(&args.model);
-                let model_path = file::root_home().join(file::model_folder_name(&args.model));
-                file::create_folder_if_not_exists(&model_path).unwrap();
-                d.download_model(&model_path).await.unwrap();
-            }
             Provider::Modelscope => {
                 println!("Downloading model from Modelscope...");
             }
         },
 
         Commands::RUN => {
-            println!("Creating and running a new inference service from a model...");
+            println!("Creating and running a new model...");
         }
 
         Commands::STOP => {
-            println!("Stopping one running inference service...");
+            println!("Stopping one running model...");
         }
 
         Commands::RM => {
@@ -132,10 +109,6 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::INSPECT => {
-            println!("Returning detailed information about inference service...");
-        }
-
-        Commands::SHOW => {
             println!("Returning detailed information about model...");
         }
 
