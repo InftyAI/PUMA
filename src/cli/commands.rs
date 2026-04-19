@@ -4,6 +4,7 @@ use prettytable::{format, row, Table};
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
 use crate::registry::model_registry::ModelRegistry;
+use crate::system::system_info::SystemInfo;
 use crate::util::format::{format_size, format_time_ago};
 
 #[derive(Parser)]
@@ -158,7 +159,8 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::INFO => {
-            println!("Displaying system-wide information...");
+            let info = SystemInfo::collect();
+            info.display();
         }
 
         Commands::INSPECT => {

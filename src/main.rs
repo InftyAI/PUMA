@@ -1,6 +1,7 @@
 mod cli;
 mod downloader;
 mod registry;
+mod system;
 mod util;
 
 use clap::Parser;
