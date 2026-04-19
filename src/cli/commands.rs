@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
-use std::path::PathBuf;
 
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
@@ -27,7 +26,7 @@ enum Commands {
     /// Stop one running model
     STOP,
     /// Remove one model
-    RM,
+    RM(RmArgs),
     /// Display system-wide information
     INFO,
     /// Return detailed information about a model
@@ -48,6 +47,12 @@ struct PullArgs {
         default_value = "huggingface"
     )]
     provider: Provider,
+}
+
+#[derive(Parser)]
+struct RmArgs {
+    #[arg(short = 'm', long, value_name = "model name")]
+    model: String,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -81,7 +86,8 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::LS => {
-            let models = ModelRegistry::load_models().unwrap_or_default();
+            let registry = ModelRegistry::new(None);
+            let models = registry.load_models().unwrap_or_default();
 
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_CLEAN);
@@ -140,8 +146,32 @@ pub async fn run(cli: Cli) {
             println!("Stopping one running model...");
         }
 
-        Commands::RM => {
-            println!("Removing one model...");
+        Commands::RM(args) => {
+            let registry = ModelRegistry::new(None);
+
+            // Check if model exists first
+            match registry.get_model(&args.model) {
+                Ok(Some(_)) => {
+                    // Delete model (cache + registry)
+                    match registry.remove_model(&args.model) {
+                        Ok(_) => {
+                            println!("✓ Successfully removed model: {}", args.model);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to remove model: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("Model not found: {}", args.model);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to load registry: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
 
         Commands::INFO => {

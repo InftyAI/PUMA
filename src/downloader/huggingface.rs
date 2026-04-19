@@ -54,8 +54,9 @@ impl Downloader for HuggingFaceDownloader {
 
         // Use unified PUMA cache directory
         let cache_dir = file::huggingface_cache_dir();
-        file::create_folder_if_not_exists(&cache_dir)
-            .map_err(|e| DownloadError::IoError(format!("Failed to create cache directory: {}", e)))?;
+        file::create_folder_if_not_exists(&cache_dir).map_err(|e| {
+            DownloadError::IoError(format!("Failed to create cache directory: {}", e))
+        })?;
 
         // Build API with PUMA cache directory
         let api = ApiBuilder::new()
@@ -158,7 +159,9 @@ impl Downloader for HuggingFaceDownloader {
             cache_path: model_cache_path.to_string_lossy().to_string(),
         };
 
-        ModelRegistry::add_model(model_info_record)
+        let registry = ModelRegistry::new(None);
+        registry
+            .register_model(model_info_record)
             .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
 
         println!(
@@ -191,9 +194,7 @@ mod tests {
     async fn test_download_real_tiny_model() {
         let downloader = HuggingFaceDownloader::new();
         // Use HF's official tiny test model (only a few KB)
-        let result = downloader
-            .download_model("InftyAI/tiny-random-gpt2")
-            .await;
+        let result = downloader.download_model("InftyAI/tiny-random-gpt2").await;
         assert!(
             result.is_ok(),
             "Failed to download tiny model: {:?}",
@@ -201,8 +202,7 @@ mod tests {
         );
 
         // Cleanup: remove the downloaded files from PUMA cache
-        let cache_dir = file::huggingface_cache_dir()
-            .join("models--InftyAI--tiny-random-gpt2");
+        let cache_dir = file::huggingface_cache_dir().join("models--InftyAI--tiny-random-gpt2");
 
         if cache_dir.exists() {
             let _ = std::fs::remove_dir_all(&cache_dir);
