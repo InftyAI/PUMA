@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
-use std::path::PathBuf;
 
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
+use crate::registry::model_registry::ModelRegistry;
+use crate::util::format::{format_size, format_time_ago};
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -14,6 +15,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::upper_case_acronyms)]
 enum Commands {
     /// List running models
     PS,
@@ -26,7 +28,7 @@ enum Commands {
     /// Stop one running model
     STOP,
     /// Remove one model
-    RM,
+    RM(RmArgs),
     /// Display system-wide information
     INFO,
     /// Return detailed information about a model
@@ -37,7 +39,7 @@ enum Commands {
 
 #[derive(Parser)]
 struct PullArgs {
-    #[arg(short = 'm', long, value_name = "model name")]
+    /// Model name to download (e.g., InftyAI/tiny-random-gpt2)
     model: String,
     #[arg(
         short = 'p',
@@ -47,20 +49,19 @@ struct PullArgs {
         default_value = "huggingface"
     )]
     provider: Provider,
-    #[arg(long, value_name = "cache directory")]
-    cache_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Parser)]
+struct RmArgs {
+    /// Model name to remove (e.g., InftyAI/tiny-random-gpt2)
+    model: String,
+}
+
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
 pub enum Provider {
+    #[default]
     Huggingface,
     Modelscope,
-}
-
-impl Default for Provider {
-    fn default() -> Self {
-        Provider::Huggingface
-    }
 }
 
 // Support commands like: pull, ls, run, ps, stop, rm, info, inspect, show.
@@ -82,29 +83,42 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::LS => {
+            let registry = ModelRegistry::new(None);
+            let models = registry.load_models().unwrap_or_default();
+
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_CLEAN);
-            table.add_row(row!["MODEl", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
-            table.add_row(row![
-                "deepseek-ai/DeepSeek-R1",
-                "huggingface",
-                "main",
-                "80GB",
-                "2 weeks ago"
-            ]);
+            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
+
+            for model in models {
+                let size_str = format_size(model.size);
+
+                let revision_short = if model.revision.len() > 8 {
+                    &model.revision[..8]
+                } else {
+                    &model.revision
+                };
+
+                let created_str = format_time_ago(&model.created_at);
+
+                table.add_row(row![
+                    model.name,
+                    model.provider,
+                    revision_short,
+                    size_str,
+                    created_str
+                ]);
+            }
+
             table.printstd();
         }
 
         Commands::PULL(args) => match args.provider {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
-                let cache_dir = args.cache_dir.unwrap_or_else(|| PathBuf::new());
-                match downloader.download_model(&args.model, &cache_dir).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("Error downloading model: {}", e);
-                        std::process::exit(1);
-                    }
+                if let Err(e) = downloader.download_model(&args.model).await {
+                    eprintln!("Error downloading model: {}", e);
+                    std::process::exit(1);
                 }
             }
             Provider::Modelscope => {
@@ -120,8 +134,27 @@ pub async fn run(cli: Cli) {
             println!("Stopping one running model...");
         }
 
-        Commands::RM => {
-            println!("Removing one model...");
+        Commands::RM(args) => {
+            let registry = ModelRegistry::new(None);
+
+            // Check if model exists first
+            match registry.get_model(&args.model) {
+                Ok(Some(_)) => {
+                    // Delete model (cache + registry)
+                    if let Err(e) = registry.remove_model(&args.model) {
+                        eprintln!("Failed to remove model: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("Model not found: {}", args.model);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to load registry: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
 
         Commands::INFO => {

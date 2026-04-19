@@ -8,7 +8,7 @@
 
 ## Quick Start
 
-### Installation
+### Install from source
 
 ```bash
 make build
@@ -34,7 +34,7 @@ make build
 ### Build
 
 ```bash
-make compile
+make build
 ```
 
 ### Test
