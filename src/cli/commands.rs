@@ -1,5 +1,9 @@
 use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
+use std::path::PathBuf;
+
+use crate::downloader::downloader::Downloader;
+use crate::downloader::huggingface::HuggingFaceDownloader;
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -33,10 +37,18 @@ enum Commands {
 
 #[derive(Parser)]
 struct PullArgs {
-    #[arg(long, value_name = "model name")]
+    #[arg(short = 'm', long, value_name = "model name")]
     model: String,
-    #[arg(long, value_name = "model provider", value_enum)]
+    #[arg(
+        short = 'p',
+        long,
+        value_name = "model provider",
+        value_enum,
+        default_value = "huggingface"
+    )]
     provider: Provider,
+    #[arg(long, value_name = "cache directory")]
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -85,7 +97,15 @@ pub async fn run(cli: Cli) {
 
         Commands::PULL(args) => match args.provider {
             Provider::Huggingface => {
-                println!("Downloading model from Huggingface...");
+                let downloader = HuggingFaceDownloader::new();
+                let cache_dir = args.cache_dir.unwrap_or_else(|| PathBuf::new());
+                match downloader.download_model(&args.model, &cache_dir).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Error downloading model: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
             Provider::Modelscope => {
                 println!("Downloading model from Modelscope...");
