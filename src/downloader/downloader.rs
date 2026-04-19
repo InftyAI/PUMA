@@ -1,5 +1,4 @@
 use core::fmt;
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum DownloadError {
@@ -25,5 +24,5 @@ impl fmt::Display for DownloadError {
 }
 
 pub trait Downloader {
-    async fn download_model(&self, name: &str, cache_dir: &PathBuf) -> Result<(), DownloadError>;
+    async fn download_model(&self, name: &str) -> Result<(), DownloadError>;
 }

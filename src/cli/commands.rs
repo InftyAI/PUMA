@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
+use crate::registry::model_registry::ModelRegistry;
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -47,8 +48,6 @@ struct PullArgs {
         default_value = "huggingface"
     )]
     provider: Provider,
-    #[arg(long, value_name = "cache directory")]
-    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -82,24 +81,45 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::LS => {
+            let models = ModelRegistry::load_models().unwrap_or_default();
+
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_CLEAN);
-            table.add_row(row!["MODEl", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
-            table.add_row(row![
-                "deepseek-ai/DeepSeek-R1",
-                "huggingface",
-                "main",
-                "80GB",
-                "2 weeks ago"
-            ]);
+            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
+
+            for model in models {
+                let size_gb = if model.size > 1_000_000_000 {
+                    format!("{:.2} GB", model.size as f64 / 1_000_000_000.0)
+                } else if model.size > 1_000_000 {
+                    format!("{:.2} MB", model.size as f64 / 1_000_000.0)
+                } else if model.size > 1_000 {
+                    format!("{:.2} KB", model.size as f64 / 1_000.0)
+                } else {
+                    format!("{} B", model.size)
+                };
+
+                let revision_short = if model.revision.len() > 8 {
+                    &model.revision[..8]
+                } else {
+                    &model.revision
+                };
+
+                table.add_row(row![
+                    model.name,
+                    model.provider,
+                    revision_short,
+                    size_gb,
+                    model.created_at
+                ]);
+            }
+
             table.printstd();
         }
 
         Commands::PULL(args) => match args.provider {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
-                let cache_dir = args.cache_dir.unwrap_or_else(|| PathBuf::new());
-                match downloader.download_model(&args.model, &cache_dir).await {
+                match downloader.download_model(&args.model).await {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("Error downloading model: {}", e);
