@@ -88,9 +88,21 @@ impl Downloader for HuggingFaceDownloader {
         // Create multi-progress for parallel downloads
         let multi_progress = Arc::new(MultiProgress::new());
 
+        // Calculate the longest filename for proper alignment
+        let max_filename_len = model_info
+            .siblings
+            .iter()
+            .map(|s| s.rfilename.len())
+            .max()
+            .unwrap_or(30);
+
         // Progress bar style with block characters (chart-like, not #)
+        let template = format!(
+            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}}",
+            width = max_filename_len
+        );
         let style = ProgressStyle::default_bar()
-            .template("{msg:<30} [{elapsed_precise}] {bar:60.white} {bytes}/{total_bytes}")
+            .template(&template)
             .unwrap()
             .progress_chars("▇▆▅▄▃▂▁ ");
 

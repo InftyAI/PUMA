@@ -1,3 +1,4 @@
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -93,6 +94,13 @@ impl ModelRegistry {
 
             // Remove from registry
             self.unregister_model(name)?;
+
+            println!(
+                "\n{} {} {}",
+                "✓".green().bold(),
+                "Successfully removed model".bright_white(),
+                name.cyan().bold()
+            );
         }
 
         Ok(())

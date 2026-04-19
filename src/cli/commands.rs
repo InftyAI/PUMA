@@ -4,6 +4,7 @@ use prettytable::{format, row, Table};
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
 use crate::registry::model_registry::ModelRegistry;
+use crate::util::format::{format_size, format_time_ago};
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -37,7 +38,7 @@ enum Commands {
 
 #[derive(Parser)]
 struct PullArgs {
-    #[arg(short = 'm', long, value_name = "model name")]
+    /// Model name to download (e.g., InftyAI/tiny-random-gpt2)
     model: String,
     #[arg(
         short = 'p',
@@ -51,7 +52,7 @@ struct PullArgs {
 
 #[derive(Parser)]
 struct RmArgs {
-    #[arg(short = 'm', long, value_name = "model name")]
+    /// Model name to remove (e.g., InftyAI/tiny-random-gpt2)
     model: String,
 }
 
@@ -94,15 +95,7 @@ pub async fn run(cli: Cli) {
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
 
             for model in models {
-                let size_gb = if model.size > 1_000_000_000 {
-                    format!("{:.2} GB", model.size as f64 / 1_000_000_000.0)
-                } else if model.size > 1_000_000 {
-                    format!("{:.2} MB", model.size as f64 / 1_000_000.0)
-                } else if model.size > 1_000 {
-                    format!("{:.2} KB", model.size as f64 / 1_000.0)
-                } else {
-                    format!("{} B", model.size)
-                };
+                let size_str = format_size(model.size);
 
                 let revision_short = if model.revision.len() > 8 {
                     &model.revision[..8]
@@ -110,12 +103,14 @@ pub async fn run(cli: Cli) {
                     &model.revision
                 };
 
+                let created_str = format_time_ago(&model.created_at);
+
                 table.add_row(row![
                     model.name,
                     model.provider,
                     revision_short,
-                    size_gb,
-                    model.created_at
+                    size_str,
+                    created_str
                 ]);
             }
 
@@ -125,12 +120,9 @@ pub async fn run(cli: Cli) {
         Commands::PULL(args) => match args.provider {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
-                match downloader.download_model(&args.model).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("Error downloading model: {}", e);
-                        std::process::exit(1);
-                    }
+                if let Err(e) = downloader.download_model(&args.model).await {
+                    eprintln!("Error downloading model: {}", e);
+                    std::process::exit(1);
                 }
             }
             Provider::Modelscope => {
@@ -153,14 +145,9 @@ pub async fn run(cli: Cli) {
             match registry.get_model(&args.model) {
                 Ok(Some(_)) => {
                     // Delete model (cache + registry)
-                    match registry.remove_model(&args.model) {
-                        Ok(_) => {
-                            println!("✓ Successfully removed model: {}", args.model);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to remove model: {}", e);
-                            std::process::exit(1);
-                        }
+                    if let Err(e) = registry.remove_model(&args.model) {
+                        eprintln!("Failed to remove model: {}", e);
+                        std::process::exit(1);
                     }
                 }
                 Ok(None) => {
