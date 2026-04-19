@@ -22,7 +22,7 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     pub fn new(home_dir: Option<PathBuf>) -> Self {
         Self {
-            home_dir: home_dir.unwrap_or_else(|| file::root_home()),
+            home_dir: home_dir.unwrap_or_else(file::root_home),
         }
     }
 
