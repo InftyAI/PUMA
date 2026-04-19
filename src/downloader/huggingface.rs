@@ -1,3 +1,4 @@
+use colored::Colorize;
 use log::{debug, info};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ impl Progress for FileProgressBar {
     async fn init(&mut self, size: usize, _filename: &str) {
         self.pb.set_length(size as u64);
         self.pb.reset();
+        self.pb.tick(); // Force render with correct size
     }
 
     async fn update(&mut self, size: usize) {
@@ -100,7 +102,7 @@ impl Downloader for HuggingFaceDownloader {
             let model_name = name.to_string();
             let filename = sibling.rfilename.clone();
 
-            let pb = multi_progress.add(ProgressBar::new(0));
+            let pb = multi_progress.add(ProgressBar::hidden());
             pb.set_style(style.clone());
             pb.set_message(filename.clone());
 
@@ -136,9 +138,14 @@ impl Downloader for HuggingFaceDownloader {
         }
 
         let elapsed_time = start_time.elapsed();
-        info!(
-            "Download model {} successfully with {:.2?}",
-            name, elapsed_time
+
+        println!(
+            "\n{} {} {} {} {:.2?}",
+            "✓".green().bold(),
+            "Successfully downloaded model".bright_white(),
+            name.cyan().bold(),
+            "in".bright_white(),
+            elapsed_time
         );
 
         Ok(())
