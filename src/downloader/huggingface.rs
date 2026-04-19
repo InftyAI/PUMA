@@ -1,9 +1,29 @@
 use log::{debug, info};
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use hf_hub::api::tokio::ApiBuilder;
+use hf_hub::api::tokio::{ApiBuilder, Progress};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
+
+#[derive(Clone)]
+struct FileProgressBar {
+    pb: ProgressBar,
+}
+
+impl Progress for FileProgressBar {
+    async fn init(&mut self, size: usize, _filename: &str) {
+        self.pb.set_length(size as u64);
+        self.pb.reset();
+    }
+
+    async fn update(&mut self, size: usize) {
+        self.pb.inc(size as u64);
+    }
+
+    async fn finish(&mut self) {}
+}
 
 pub struct HuggingFaceDownloader;
 
@@ -21,24 +41,20 @@ impl Default for HuggingFaceDownloader {
 
 impl Downloader for HuggingFaceDownloader {
     async fn download_model(&self, name: &str, cache_dir: &PathBuf) -> Result<(), DownloadError> {
-        info!("Downloading model {} from Hugging Face...", name);
-
         let start_time = std::time::Instant::now();
 
-        // Build API - disable default progress bars (we have our own implementation)
+        info!("Downloading model {} from Hugging Face...", name);
+
+        // Build API without default progress bars (we have our own implementation)
         let api = if cache_dir.as_os_str().is_empty() {
-            // Use default HF cache with progress disabled
-            ApiBuilder::new()
-                .with_progress(false)
-                .build()
-                .map_err(|e| {
-                    DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
-                })?
+            // Use default HF cache
+            ApiBuilder::new().build().map_err(|e| {
+                DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
+            })?
         } else {
-            // Use custom cache directory with progress disabled
+            // Use custom cache directory
             ApiBuilder::new()
                 .with_cache_dir(cache_dir.clone())
-                .with_progress(false)
                 .build()
                 .map_err(|e| {
                     DownloadError::ApiError(format!(
@@ -67,15 +83,56 @@ impl Downloader for HuggingFaceDownloader {
 
         debug!("Model info for {}: {:?}", name, model_info);
 
-        // Download all files in the repository
-        for sibling in &model_info.siblings {
-            debug!("Downloading: {}", sibling.rfilename);
-            repo.get(&sibling.rfilename).await.map_err(|e| {
-                DownloadError::NetworkError(format!(
-                    "Failed to download {}: {}",
-                    sibling.rfilename, e
-                ))
-            })?;
+        // Create multi-progress for parallel downloads
+        let multi_progress = Arc::new(MultiProgress::new());
+
+        // Progress bar style with block characters (chart-like, not #)
+        let style = ProgressStyle::default_bar()
+            .template("{msg:<30} [{elapsed_precise}] {bar:40.bright_white/bright_black} {bytes}/{total_bytes}")
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏▒");
+
+        // Download all files in parallel
+        let mut tasks = Vec::new();
+
+        for sibling in model_info.siblings {
+            let api_clone = api.clone();
+            let model_name = name.to_string();
+            let filename = sibling.rfilename.clone();
+
+            let pb = multi_progress.add(ProgressBar::new(0));
+            pb.set_style(style.clone());
+            pb.set_message(filename.clone());
+
+            let task = tokio::spawn(async move {
+                debug!("Downloading: {}", filename);
+
+                let repo = api_clone.model(model_name);
+                let progress = FileProgressBar { pb: pb.clone() };
+
+                let result = repo.download_with_progress(&filename, progress).await;
+
+                match &result {
+                    Ok(_) => {
+                        pb.finish();
+                    }
+                    Err(_) => {
+                        pb.abandon();
+                    }
+                }
+
+                result.map_err(|e| {
+                    DownloadError::NetworkError(format!("Failed to download {}: {}", filename, e))
+                })
+            });
+
+            tasks.push(task);
+        }
+
+        // Wait for all downloads to complete
+        for task in tasks {
+            task.await
+                .map_err(|e| DownloadError::ApiError(format!("Task join error: {}", e)))??;
         }
 
         let elapsed_time = start_time.elapsed();
