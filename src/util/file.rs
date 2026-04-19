@@ -26,6 +26,7 @@ pub fn huggingface_cache_dir() -> PathBuf {
     cache_dir().join("huggingface")
 }
 
+#[allow(dead_code)]
 pub fn modelscope_cache_dir() -> PathBuf {
     cache_dir().join("modelscope")
 }

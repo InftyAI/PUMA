@@ -15,6 +15,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::upper_case_acronyms)]
 enum Commands {
     /// List running models
     PS,
@@ -56,16 +57,11 @@ struct RmArgs {
     model: String,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Debug, Clone, Default, clap::ValueEnum)]
 pub enum Provider {
+    #[default]
     Huggingface,
     Modelscope,
-}
-
-impl Default for Provider {
-    fn default() -> Self {
-        Provider::Huggingface
-    }
 }
 
 // Support commands like: pull, ls, run, ps, stop, rm, info, inspect, show.

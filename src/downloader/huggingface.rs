@@ -1,6 +1,5 @@
 use colored::Colorize;
 use log::{debug, info};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 

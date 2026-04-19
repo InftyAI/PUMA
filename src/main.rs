@@ -4,7 +4,6 @@ mod registry;
 mod util;
 
 use clap::Parser;
-use env_logger;
 use tokio::runtime::Builder;
 
 use crate::cli::commands::{run, Cli};

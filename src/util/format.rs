@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 
 /// Format byte size to human-readable format (B, KB, MB, GB)
 pub fn format_size(bytes: u64) -> String {
@@ -27,24 +27,40 @@ pub fn format_time_ago(timestamp: &str) -> String {
     let seconds = duration.num_seconds();
 
     if seconds < 0 {
-        return "just now".to_string();
+        "just now".to_string()
     } else if seconds < 60 {
-        return format!("{} seconds ago", seconds);
+        format!("{} seconds ago", seconds)
     } else if seconds < 3600 {
         let minutes = seconds / 60;
-        return format!("{} {} ago", minutes, if minutes == 1 { "minute" } else { "minutes" });
+        format!(
+            "{} {} ago",
+            minutes,
+            if minutes == 1 { "minute" } else { "minutes" }
+        )
     } else if seconds < 86400 {
         let hours = seconds / 3600;
-        return format!("{} {} ago", hours, if hours == 1 { "hour" } else { "hours" });
+        format!(
+            "{} {} ago",
+            hours,
+            if hours == 1 { "hour" } else { "hours" }
+        )
     } else if seconds < 2592000 {
         let days = seconds / 86400;
-        return format!("{} {} ago", days, if days == 1 { "day" } else { "days" });
+        format!("{} {} ago", days, if days == 1 { "day" } else { "days" })
     } else if seconds < 31536000 {
         let months = seconds / 2592000;
-        return format!("{} {} ago", months, if months == 1 { "month" } else { "months" });
+        format!(
+            "{} {} ago",
+            months,
+            if months == 1 { "month" } else { "months" }
+        )
     } else {
         let years = seconds / 31536000;
-        return format!("{} {} ago", years, if years == 1 { "year" } else { "years" });
+        format!(
+            "{} {} ago",
+            years,
+            if years == 1 { "year" } else { "years" }
+        )
     }
 }
 
