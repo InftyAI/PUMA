@@ -1,16 +1,19 @@
 use colored::Colorize;
 use log::{debug, info};
-use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
+use crate::registry::model_registry::{ModelInfo, ModelRegistry};
+use crate::util::file;
 
 #[derive(Clone)]
 struct FileProgressBar {
     pb: ProgressBar,
+    total_size: Arc<AtomicU64>,
 }
 
 impl Progress for FileProgressBar {
@@ -18,6 +21,7 @@ impl Progress for FileProgressBar {
         self.pb.set_length(size as u64);
         self.pb.reset();
         self.pb.tick(); // Force render with correct size
+        self.total_size.fetch_add(size as u64, Ordering::Relaxed);
     }
 
     async fn update(&mut self, size: usize) {
@@ -42,29 +46,24 @@ impl Default for HuggingFaceDownloader {
 }
 
 impl Downloader for HuggingFaceDownloader {
-    async fn download_model(&self, name: &str, cache_dir: &PathBuf) -> Result<(), DownloadError> {
+    async fn download_model(&self, name: &str) -> Result<(), DownloadError> {
         let start_time = std::time::Instant::now();
 
         info!("Downloading model {} from Hugging Face...", name);
 
-        // Build API without default progress bars (we have our own implementation)
-        let api = if cache_dir.as_os_str().is_empty() {
-            // Use default HF cache
-            ApiBuilder::new().build().map_err(|e| {
+        // Use unified PUMA cache directory
+        let cache_dir = file::huggingface_cache_dir();
+        file::create_folder_if_not_exists(&cache_dir).map_err(|e| {
+            DownloadError::IoError(format!("Failed to create cache directory: {}", e))
+        })?;
+
+        // Build API with PUMA cache directory
+        let api = ApiBuilder::new()
+            .with_cache_dir(cache_dir.clone())
+            .build()
+            .map_err(|e| {
                 DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
-            })?
-        } else {
-            // Use custom cache directory
-            ApiBuilder::new()
-                .with_cache_dir(cache_dir.clone())
-                .build()
-                .map_err(|e| {
-                    DownloadError::ApiError(format!(
-                        "Failed to initialize Hugging Face API with custom cache: {}",
-                        e
-                    ))
-                })?
-        };
+            })?;
 
         // Download the entire model repository using snapshot download
         let repo = api.model(name.to_string());
@@ -88,19 +87,34 @@ impl Downloader for HuggingFaceDownloader {
         // Create multi-progress for parallel downloads
         let multi_progress = Arc::new(MultiProgress::new());
 
+        // Calculate the longest filename for proper alignment
+        let max_filename_len = model_info
+            .siblings
+            .iter()
+            .map(|s| s.rfilename.len())
+            .max()
+            .unwrap_or(30);
+
         // Progress bar style with block characters (chart-like, not #)
+        let template = format!(
+            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}}",
+            width = max_filename_len
+        );
         let style = ProgressStyle::default_bar()
-            .template("{msg:<30} [{elapsed_precise}] {bar:60.white} {bytes}/{total_bytes}")
+            .template(&template)
             .unwrap()
             .progress_chars("▇▆▅▄▃▂▁ ");
 
         // Download all files in parallel
         let mut tasks = Vec::new();
+        let sha = model_info.sha.clone();
+        let total_size = Arc::new(AtomicU64::new(0));
 
         for sibling in model_info.siblings {
             let api_clone = api.clone();
             let model_name = name.to_string();
             let filename = sibling.rfilename.clone();
+            let total_size_clone = Arc::clone(&total_size);
 
             let pb = multi_progress.add(ProgressBar::hidden());
             pb.set_style(style.clone());
@@ -110,7 +124,10 @@ impl Downloader for HuggingFaceDownloader {
                 debug!("Downloading: {}", filename);
 
                 let repo = api_clone.model(model_name);
-                let progress = FileProgressBar { pb: pb.clone() };
+                let progress = FileProgressBar {
+                    pb: pb.clone(),
+                    total_size: total_size_clone,
+                };
 
                 let result = repo.download_with_progress(&filename, progress).await;
 
@@ -139,6 +156,25 @@ impl Downloader for HuggingFaceDownloader {
 
         let elapsed_time = start_time.elapsed();
 
+        // Get accumulated size from downloads
+        let downloaded_size = total_size.load(Ordering::Relaxed);
+        let model_cache_path = cache_dir.join(format!("models--{}", name.replace("/", "--")));
+
+        // Register the model
+        let model_info_record = ModelInfo {
+            name: name.to_string(),
+            provider: "huggingface".to_string(),
+            revision: sha,
+            size: downloaded_size,
+            created_at: chrono::Local::now().to_rfc3339(),
+            cache_path: model_cache_path.to_string_lossy().to_string(),
+        };
+
+        let registry = ModelRegistry::new(None);
+        registry
+            .register_model(model_info_record)
+            .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
+
         println!(
             "\n{} {} {} {} {:.2?}",
             "✓".green().bold(),
@@ -160,7 +196,7 @@ mod tests {
     async fn test_download_model_invalid() {
         let downloader = HuggingFaceDownloader::new();
         let result = downloader
-            .download_model("invalid-model-that-does-not-exist-12345", &PathBuf::new())
+            .download_model("invalid-model-that-does-not-exist-12345")
             .await;
         assert!(result.is_err());
     }
@@ -169,53 +205,18 @@ mod tests {
     async fn test_download_real_tiny_model() {
         let downloader = HuggingFaceDownloader::new();
         // Use HF's official tiny test model (only a few KB)
-        let result = downloader
-            .download_model("InftyAI/tiny-random-gpt2", &PathBuf::new())
-            .await;
+        let result = downloader.download_model("InftyAI/tiny-random-gpt2").await;
         assert!(
             result.is_ok(),
             "Failed to download tiny model: {:?}",
             result
         );
 
-        // Cleanup: remove the downloaded files from the default HF cache (~/.cache/huggingface/hub)
-        if let Some(home_dir) = dirs::home_dir() {
-            let cache_dir = home_dir
-                .join(".cache")
-                .join("huggingface")
-                .join("hub")
-                .join("models--InftyAI--tiny-random-gpt2");
+        // Cleanup: remove the downloaded files from PUMA cache
+        let cache_dir = file::huggingface_cache_dir().join("models--InftyAI--tiny-random-gpt2");
 
-            if cache_dir.exists() {
-                let _ = std::fs::remove_dir_all(&cache_dir);
-            }
+        if cache_dir.exists() {
+            let _ = std::fs::remove_dir_all(&cache_dir);
         }
-    }
-
-    #[tokio::test]
-    async fn test_download_with_custom_cache() {
-        use std::env;
-        use std::fs;
-
-        let downloader = HuggingFaceDownloader::new();
-        let temp_dir = env::temp_dir().join("puma_test_cache");
-
-        print!("Using temporary cache directory: {:?}\n", temp_dir);
-
-        // Create the directory first
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let result = downloader
-            .download_model("InftyAI/tiny-random-gpt2", &temp_dir)
-            .await;
-
-        assert!(
-            result.is_ok(),
-            "Failed to download with custom cache: {:?}",
-            result
-        );
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
