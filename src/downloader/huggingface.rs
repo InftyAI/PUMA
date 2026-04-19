@@ -90,7 +90,7 @@ impl Downloader for HuggingFaceDownloader {
 
         // Progress bar style with block characters (chart-like, not #)
         let style = ProgressStyle::default_bar()
-            .template("{msg:<30} [{elapsed_precise}] {bar:40.bright_white} {bytes}/{total_bytes}")
+            .template("{msg:<30} [{elapsed_precise}] {bar:40.white} {bytes}/{total_bytes}\n")
             .unwrap()
             .progress_chars("█▉▊▋▌▍▎▏░");
 
