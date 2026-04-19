@@ -90,9 +90,9 @@ impl Downloader for HuggingFaceDownloader {
 
         // Progress bar style with block characters (chart-like, not #)
         let style = ProgressStyle::default_bar()
-            .template("{msg:<30} [{elapsed_precise}] {bar:40.white} {bytes}/{total_bytes}\n")
+            .template("{msg:<30} [{elapsed_precise}] {bar:60.white} {bytes}/{total_bytes}")
             .unwrap()
-            .progress_chars("█▉▊▋▌▍▎▏░");
+            .progress_chars("▇▆▅▄▃▂▁ ");
 
         // Download all files in parallel
         let mut tasks = Vec::new();
