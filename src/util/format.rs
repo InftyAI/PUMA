@@ -1,13 +1,17 @@
 use chrono::{DateTime, Utc};
 
-/// Format byte size to human-readable format (B, KB, MB, GB)
+/// Format byte size to human-readable format (B, KiB, MiB, GiB)
 pub fn format_size(bytes: u64) -> String {
-    if bytes > 1_000_000_000 {
-        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes > 1_000_000 {
-        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes > 1_000 {
-        format!("{:.2} KB", bytes as f64 / 1_000.0)
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    if bytes as f64 >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB)
+    } else if bytes as f64 >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB)
+    } else if bytes as f64 >= KIB {
+        format!("{:.2} KiB", bytes as f64 / KIB)
     } else {
         format!("{} B", bytes)
     }
@@ -73,54 +77,54 @@ mod tests {
         assert_eq!(format_size(0), "0 B");
         assert_eq!(format_size(1), "1 B");
         assert_eq!(format_size(999), "999 B");
-        assert_eq!(format_size(1000), "1000 B");
+        assert_eq!(format_size(1023), "1023 B");
     }
 
     #[test]
     fn test_format_size_kilobytes() {
-        assert_eq!(format_size(1_001), "1.00 KB");
-        assert_eq!(format_size(1_500), "1.50 KB");
-        assert_eq!(format_size(10_000), "10.00 KB");
-        assert_eq!(format_size(999_999), "1000.00 KB");
+        assert_eq!(format_size(1024), "1.00 KiB");
+        assert_eq!(format_size(1536), "1.50 KiB");
+        assert_eq!(format_size(10240), "10.00 KiB");
+        assert_eq!(format_size(1_048_575), "1024.00 KiB");
     }
 
     #[test]
     fn test_format_size_megabytes() {
-        assert_eq!(format_size(1_000_001), "1.00 MB");
-        assert_eq!(format_size(1_500_000), "1.50 MB");
-        assert_eq!(format_size(10_000_000), "10.00 MB");
-        assert_eq!(format_size(500_000_000), "500.00 MB");
+        assert_eq!(format_size(1_048_576), "1.00 MiB");
+        assert_eq!(format_size(1_572_864), "1.50 MiB");
+        assert_eq!(format_size(10_485_760), "10.00 MiB");
+        assert_eq!(format_size(524_288_000), "500.00 MiB");
     }
 
     #[test]
     fn test_format_size_gigabytes() {
-        assert_eq!(format_size(1_000_000_001), "1.00 GB");
-        assert_eq!(format_size(1_500_000_000), "1.50 GB");
-        assert_eq!(format_size(10_000_000_000), "10.00 GB");
-        assert_eq!(format_size(100_000_000_000), "100.00 GB");
+        assert_eq!(format_size(1_073_741_824), "1.00 GiB");
+        assert_eq!(format_size(1_610_612_736), "1.50 GiB");
+        assert_eq!(format_size(10_737_418_240), "10.00 GiB");
+        assert_eq!(format_size(107_374_182_400), "100.00 GiB");
     }
 
     #[test]
     fn test_format_size_edge_cases() {
-        // Boundary between KB and MB
-        assert_eq!(format_size(1_000_000), "1000.00 KB");
-        assert_eq!(format_size(1_000_001), "1.00 MB");
+        // Boundary between KiB and MiB
+        assert_eq!(format_size(1_048_575), "1024.00 KiB");
+        assert_eq!(format_size(1_048_576), "1.00 MiB");
 
-        // Boundary between MB and GB
-        assert_eq!(format_size(1_000_000_000), "1000.00 MB");
-        assert_eq!(format_size(1_000_000_001), "1.00 GB");
+        // Boundary between MiB and GiB
+        assert_eq!(format_size(1_073_741_823), "1024.00 MiB");
+        assert_eq!(format_size(1_073_741_824), "1.00 GiB");
     }
 
     #[test]
     fn test_format_size_realistic_model_sizes() {
-        // Small model (100 MB)
-        assert_eq!(format_size(104_857_600), "104.86 MB");
+        // Small model (100 MiB)
+        assert_eq!(format_size(104_857_600), "100.00 MiB");
 
-        // Medium model (7 GB)
-        assert_eq!(format_size(7_516_192_768), "7.52 GB");
+        // Medium model (7 GiB)
+        assert_eq!(format_size(7_516_192_768), "7.00 GiB");
 
-        // Large model (65 GB)
-        assert_eq!(format_size(69_793_218_560), "69.79 GB");
+        // Large model (65 GiB)
+        assert_eq!(format_size(69_793_218_560), "65.00 GiB");
     }
 
     #[test]
