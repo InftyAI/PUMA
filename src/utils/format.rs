@@ -17,6 +17,23 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Format byte size to human-readable format using decimal units (B, KB, MB, GB)
+pub fn format_size_decimal(bytes: u64) -> String {
+    const KB: f64 = 1000.0;
+    const MB: f64 = 1000.0 * 1000.0;
+    const GB: f64 = 1000.0 * 1000.0 * 1000.0;
+
+    if bytes as f64 >= GB {
+        format!("{:.2} GB", bytes as f64 / GB)
+    } else if bytes as f64 >= MB {
+        format!("{:.2} MB", bytes as f64 / MB)
+    } else if bytes as f64 >= KB {
+        format!("{:.2} KB", bytes as f64 / KB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 /// Format RFC3339 timestamp to human-readable relative time (e.g., "2 hours ago")
 pub fn format_time_ago(timestamp: &str) -> String {
     // Try to parse as RFC3339
@@ -212,5 +229,48 @@ mod tests {
     fn test_format_time_ago_invalid() {
         let invalid = "not-a-timestamp";
         assert_eq!(format_time_ago(invalid), "not-a-timestamp");
+    }
+
+    #[test]
+    fn test_format_size_decimal_bytes() {
+        assert_eq!(format_size_decimal(0), "0 B");
+        assert_eq!(format_size_decimal(1), "1 B");
+        assert_eq!(format_size_decimal(999), "999 B");
+    }
+
+    #[test]
+    fn test_format_size_decimal_kilobytes() {
+        assert_eq!(format_size_decimal(1000), "1.00 KB");
+        assert_eq!(format_size_decimal(1500), "1.50 KB");
+        assert_eq!(format_size_decimal(10000), "10.00 KB");
+        assert_eq!(format_size_decimal(999_999), "1000.00 KB");
+    }
+
+    #[test]
+    fn test_format_size_decimal_megabytes() {
+        assert_eq!(format_size_decimal(1_000_000), "1.00 MB");
+        assert_eq!(format_size_decimal(1_500_000), "1.50 MB");
+        assert_eq!(format_size_decimal(10_000_000), "10.00 MB");
+        assert_eq!(format_size_decimal(500_000_000), "500.00 MB");
+    }
+
+    #[test]
+    fn test_format_size_decimal_gigabytes() {
+        assert_eq!(format_size_decimal(1_000_000_000), "1.00 GB");
+        assert_eq!(format_size_decimal(1_500_000_000), "1.50 GB");
+        assert_eq!(format_size_decimal(10_000_000_000), "10.00 GB");
+        assert_eq!(format_size_decimal(100_000_000_000), "100.00 GB");
+    }
+
+    #[test]
+    fn test_format_size_decimal_realistic_model_sizes() {
+        // Small model (100 MB)
+        assert_eq!(format_size_decimal(100_000_000), "100.00 MB");
+
+        // Medium model (7 GB)
+        assert_eq!(format_size_decimal(7_000_000_000), "7.00 GB");
+
+        // Large model (65 GB)
+        assert_eq!(format_size_decimal(65_000_000_000), "65.00 GB");
     }
 }

@@ -2,13 +2,13 @@ mod cli;
 mod downloader;
 mod registry;
 mod system;
-mod util;
+mod utils;
 
 use clap::Parser;
 use tokio::runtime::Builder;
 
 use crate::cli::commands::{run, Cli};
-use crate::util::file;
+use crate::utils::file;
 
 fn main() {
     // Initialize logger.

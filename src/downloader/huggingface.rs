@@ -1,34 +1,31 @@
 use colored::Colorize;
-use log::{debug, info};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use log::debug;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
+use crate::downloader::progress::{DownloadProgressManager, FileProgress};
 use crate::registry::model_registry::{ModelInfo, ModelRegistry};
-use crate::util::file;
+use crate::utils::file::{self, format_model_name};
 
+/// Adapter to bridge HuggingFace's Progress trait with our FileProgress
 #[derive(Clone)]
-struct FileProgressBar {
-    pb: ProgressBar,
-    total_size: Arc<AtomicU64>,
+struct HfProgressAdapter {
+    progress: FileProgress,
 }
 
-impl Progress for FileProgressBar {
+impl Progress for HfProgressAdapter {
     async fn init(&mut self, size: usize, _filename: &str) {
-        self.pb.set_length(size as u64);
-        self.pb.reset();
-        self.pb.tick(); // Force render with correct size
-        self.total_size.fetch_add(size as u64, Ordering::Relaxed);
+        self.progress.init(size as u64);
     }
 
     async fn update(&mut self, size: usize) {
-        self.pb.inc(size as u64);
+        self.progress.update(size as u64);
     }
 
-    async fn finish(&mut self) {}
+    async fn finish(&mut self) {
+        self.progress.finish();
+    }
 }
 
 pub struct HuggingFaceDownloader;
@@ -49,7 +46,7 @@ impl Downloader for HuggingFaceDownloader {
     async fn download_model(&self, name: &str) -> Result<(), DownloadError> {
         let start_time = std::time::Instant::now();
 
-        info!("Downloading model {} from Hugging Face...", name);
+        debug!("Downloading model {} from Hugging Face...", name);
 
         // Use unified PUMA cache directory
         let cache_dir = file::huggingface_cache_dir();
@@ -64,6 +61,8 @@ impl Downloader for HuggingFaceDownloader {
             .map_err(|e| {
                 DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
             })?;
+
+        println!("🐆 pulling manifest");
 
         // Download the entire model repository using snapshot download
         let repo = api.model(name.to_string());
@@ -84,9 +83,6 @@ impl Downloader for HuggingFaceDownloader {
 
         debug!("Model info for {}: {:?}", name, model_info);
 
-        // Create multi-progress for parallel downloads
-        let multi_progress = Arc::new(MultiProgress::new());
-
         // Calculate the longest filename for proper alignment
         let max_filename_len = model_info
             .siblings
@@ -95,54 +91,59 @@ impl Downloader for HuggingFaceDownloader {
             .max()
             .unwrap_or(30);
 
-        // Progress bar style with block characters (chart-like, not #)
-        let template = format!(
-            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}}",
-            width = max_filename_len
-        );
-        let style = ProgressStyle::default_bar()
-            .template(&template)
-            .unwrap()
-            .progress_chars("▇▆▅▄▃▂▁ ");
+        // Create progress manager
+        let progress_manager = DownloadProgressManager::new(max_filename_len);
 
-        // Download all files in parallel
-        let mut tasks = Vec::new();
+        // Calculate cache paths
+        let model_cache_path = cache_dir.join(format_model_name(name));
         let sha = model_info.sha.clone();
-        let total_size = Arc::new(AtomicU64::new(0));
+        let snapshot_path = model_cache_path.join("snapshots").join(&sha);
+
+        // Process all files in manifest order (cached files show as instantly complete)
+        let mut tasks = Vec::new();
 
         for sibling in model_info.siblings {
             let api_clone = api.clone();
             let model_name = name.to_string();
             let filename = sibling.rfilename.clone();
-            let total_size_clone = Arc::clone(&total_size);
-
-            let pb = multi_progress.add(ProgressBar::hidden());
-            pb.set_style(style.clone());
-            pb.set_message(filename.clone());
+            let progress_manager_clone = progress_manager.clone();
+            let snapshot_path_clone = snapshot_path.clone();
 
             let task = tokio::spawn(async move {
-                debug!("Downloading: {}", filename);
-
                 let repo = api_clone.model(model_name);
-                let progress = FileProgressBar {
-                    pb: pb.clone(),
-                    total_size: total_size_clone,
-                };
 
-                let result = repo.download_with_progress(&filename, progress).await;
+                // Check if file exists in cache
+                let cached_file_path = snapshot_path_clone.join(&filename);
+                if cached_file_path.exists() {
+                    debug!("File {} found in cache, showing as complete", filename);
 
-                match &result {
-                    Ok(_) => {
-                        pb.finish();
-                    }
-                    Err(_) => {
-                        pb.abandon();
-                    }
+                    // Create progress bar and mark as instantly complete
+                    let mut file_progress = progress_manager_clone.create_file_progress(&filename);
+                    let file_size = cached_file_path.metadata().map(|m| m.len()).unwrap_or(0);
+                    file_progress.init(file_size);
+                    file_progress.update(file_size);
+                    file_progress.finish();
+
+                    return Ok(());
                 }
 
-                result.map_err(|e| {
-                    DownloadError::NetworkError(format!("Failed to download {}: {}", filename, e))
-                })
+                // File not in cache, download with progress
+                debug!("Downloading: {}", filename);
+                let file_progress = progress_manager_clone.create_file_progress(&filename);
+                let progress = HfProgressAdapter {
+                    progress: file_progress,
+                };
+
+                repo.download_with_progress(&filename, progress)
+                    .await
+                    .map_err(|e| {
+                        DownloadError::NetworkError(format!(
+                            "Failed to download {}: {}",
+                            filename, e
+                        ))
+                    })?;
+
+                Ok(())
             });
 
             tasks.push(task);
@@ -157,8 +158,8 @@ impl Downloader for HuggingFaceDownloader {
         let elapsed_time = start_time.elapsed();
 
         // Get accumulated size from downloads
-        let downloaded_size = total_size.load(Ordering::Relaxed);
-        let model_cache_path = cache_dir.join(format!("models--{}", name.replace("/", "--")));
+        let downloaded_size = progress_manager.total_downloaded_bytes();
+        let model_cache_path = cache_dir.join(format_model_name(name));
 
         // Register the model
         let model_info_record = ModelInfo {
