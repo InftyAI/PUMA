@@ -5,7 +5,7 @@ use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
-use crate::util::format::{format_size, format_time_ago};
+use crate::utils::format::{format_size_decimal, format_time_ago};
 
 #[derive(Parser)]
 #[command(name = "PUMA")]
@@ -92,7 +92,7 @@ pub async fn run(cli: Cli) {
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
 
             for model in models {
-                let size_str = format_size(model.size);
+                let size_str = format_size_decimal(model.size);
 
                 let revision_short = if model.revision.len() > 8 {
                     &model.revision[..8]
@@ -118,7 +118,7 @@ pub async fn run(cli: Cli) {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
                 if let Err(e) = downloader.download_model(&args.model).await {
-                    eprintln!("Error downloading model: {}", e);
+                    eprintln!("❌ Error downloading model: {}", e);
                     std::process::exit(1);
                 }
             }
