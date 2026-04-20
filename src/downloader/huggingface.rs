@@ -99,7 +99,7 @@ impl Downloader for HuggingFaceDownloader {
         let sha = model_info.sha.clone();
         let snapshot_path = model_cache_path.join("snapshots").join(&sha);
 
-        // Download all files in parallel
+        // Process all files in manifest order (cached files show as instantly complete)
         let mut tasks = Vec::new();
 
         for sibling in model_info.siblings {
@@ -112,10 +112,18 @@ impl Downloader for HuggingFaceDownloader {
             let task = tokio::spawn(async move {
                 let repo = api_clone.model(model_name);
 
-                // Manually check if file exists in cache snapshot
+                // Check if file exists in cache
                 let cached_file_path = snapshot_path_clone.join(&filename);
                 if cached_file_path.exists() {
-                    debug!("File {} found in cache, skipping download", filename);
+                    debug!("File {} found in cache, showing as complete", filename);
+
+                    // Create progress bar and mark as instantly complete
+                    let mut file_progress = progress_manager_clone.create_file_progress(&filename);
+                    let file_size = cached_file_path.metadata().map(|m| m.len()).unwrap_or(0);
+                    file_progress.init(file_size);
+                    file_progress.update(file_size);
+                    file_progress.finish();
+
                     return Ok(());
                 }
 
