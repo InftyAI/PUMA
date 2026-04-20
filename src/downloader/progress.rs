@@ -17,10 +17,11 @@ use std::sync::Arc;
 ///
 /// let total = progress_manager.total_downloaded_bytes();
 /// ```
+#[derive(Clone)]
 pub struct DownloadProgressManager {
     multi_progress: Arc<MultiProgress>,
     total_size: Arc<AtomicU64>,
-    style: ProgressStyle,
+    style: Arc<ProgressStyle>,
 }
 
 impl DownloadProgressManager {
@@ -40,14 +41,14 @@ impl DownloadProgressManager {
         Self {
             multi_progress,
             total_size: Arc::new(AtomicU64::new(0)),
-            style,
+            style: Arc::new(style),
         }
     }
 
     /// Create a new progress bar for a file download
     pub fn create_file_progress(&self, filename: &str) -> FileProgress {
         let pb = self.multi_progress.add(ProgressBar::hidden());
-        pb.set_style(self.style.clone());
+        pb.set_style((*self.style).clone());
         pb.set_message(filename.to_string());
 
         FileProgress {

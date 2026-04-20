@@ -118,7 +118,7 @@ pub async fn run(cli: Cli) {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
                 if let Err(e) = downloader.download_model(&args.model).await {
-                    eprintln!("Error downloading model: {}", e);
+                    eprintln!("❌ Error downloading model: {}", e);
                     std::process::exit(1);
                 }
             }

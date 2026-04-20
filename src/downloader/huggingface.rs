@@ -1,5 +1,5 @@
 use colored::Colorize;
-use log::{debug, info};
+use log::debug;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
 
@@ -46,7 +46,7 @@ impl Downloader for HuggingFaceDownloader {
     async fn download_model(&self, name: &str) -> Result<(), DownloadError> {
         let start_time = std::time::Instant::now();
 
-        info!("Downloading model {} from Hugging Face...", name);
+        debug!("Downloading model {} from Hugging Face...", name);
 
         // Use unified PUMA cache directory
         let cache_dir = file::huggingface_cache_dir();
@@ -94,30 +94,47 @@ impl Downloader for HuggingFaceDownloader {
         // Create progress manager
         let progress_manager = DownloadProgressManager::new(max_filename_len);
 
+        // Calculate cache paths
+        let model_cache_path = cache_dir.join(format!("models--{}", name.replace("/", "--")));
+        let sha = model_info.sha.clone();
+        let snapshot_path = model_cache_path.join("snapshots").join(&sha);
+
         // Download all files in parallel
         let mut tasks = Vec::new();
-        let sha = model_info.sha.clone();
 
         for sibling in model_info.siblings {
             let api_clone = api.clone();
             let model_name = name.to_string();
             let filename = sibling.rfilename.clone();
-
-            let file_progress = progress_manager.create_file_progress(&filename);
+            let progress_manager_clone = progress_manager.clone();
+            let snapshot_path_clone = snapshot_path.clone();
 
             let task = tokio::spawn(async move {
-                debug!("Downloading: {}", filename);
-
                 let repo = api_clone.model(model_name);
+
+                // Manually check if file exists in cache snapshot
+                let cached_file_path = snapshot_path_clone.join(&filename);
+                if cached_file_path.exists() {
+                    debug!("File {} found in cache, skipping download", filename);
+                    return Ok(());
+                }
+
+                // File not in cache, download with progress
+                debug!("Downloading: {}", filename);
+                let file_progress = progress_manager_clone.create_file_progress(&filename);
                 let progress = HfProgressAdapter {
                     progress: file_progress,
                 };
 
-                let result = repo.download_with_progress(&filename, progress).await;
-
-                result.map_err(|e| {
-                    DownloadError::NetworkError(format!("Failed to download {}: {}", filename, e))
-                })
+                repo.download_with_progress(&filename, progress)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| {
+                        DownloadError::NetworkError(format!(
+                            "Failed to download {}: {}",
+                            filename, e
+                        ))
+                    })
             });
 
             tasks.push(task);
