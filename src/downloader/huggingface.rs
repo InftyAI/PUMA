@@ -65,6 +65,8 @@ impl Downloader for HuggingFaceDownloader {
                 DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
             })?;
 
+        println!("🐆 pulling manifest");
+
         // Download the entire model repository using snapshot download
         let repo = api.model(name.to_string());
 

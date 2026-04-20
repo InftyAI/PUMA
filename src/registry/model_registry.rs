@@ -96,7 +96,7 @@ impl ModelRegistry {
             self.unregister_model(name)?;
 
             println!(
-                "\n{} {} {}",
+                "{} {} {}",
                 "✓".green().bold(),
                 "Successfully removed model".bright_white(),
                 name.cyan().bold()
