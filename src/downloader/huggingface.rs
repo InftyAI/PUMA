@@ -136,13 +136,14 @@ impl Downloader for HuggingFaceDownloader {
 
                 repo.download_with_progress(&filename, progress)
                     .await
-                    .map(|_| ())
                     .map_err(|e| {
                         DownloadError::NetworkError(format!(
                             "Failed to download {}: {}",
                             filename, e
                         ))
-                    })
+                    })?;
+
+                Ok(())
             });
 
             tasks.push(task);

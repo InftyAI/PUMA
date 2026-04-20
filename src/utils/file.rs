@@ -61,10 +61,7 @@ mod tests {
 
     #[test]
     fn test_format_model_name_basic() {
-        assert_eq!(
-            format_model_name("owner/model"),
-            "models--owner--model"
-        );
+        assert_eq!(format_model_name("owner/model"), "models--owner--model");
     }
 
     #[test]
@@ -85,10 +82,7 @@ mod tests {
 
     #[test]
     fn test_format_model_name_no_slash() {
-        assert_eq!(
-            format_model_name("model"),
-            "models--model"
-        );
+        assert_eq!(format_model_name("model"), "models--model");
     }
 
     #[test]
