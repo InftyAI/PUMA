@@ -31,6 +31,12 @@ pub fn modelscope_cache_dir() -> PathBuf {
     cache_dir().join("modelscope")
 }
 
+/// Format model name for HuggingFace cache directory
+/// Converts "owner/model" to "models--owner--model"
+pub fn format_model_name(name: &str) -> String {
+    format!("models--{}", name.replace("/", "--"))
+}
+
 /// List all files recursively in a directory
 #[allow(dead_code)]
 pub fn list_files_recursive(dir: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
@@ -47,4 +53,49 @@ pub fn list_files_recursive(dir: &std::path::Path) -> std::io::Result<Vec<PathBu
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_model_name_basic() {
+        assert_eq!(
+            format_model_name("owner/model"),
+            "models--owner--model"
+        );
+    }
+
+    #[test]
+    fn test_format_model_name_complex() {
+        assert_eq!(
+            format_model_name("Qwen/Qwen3.5-2B"),
+            "models--Qwen--Qwen3.5-2B"
+        );
+    }
+
+    #[test]
+    fn test_format_model_name_multiple_slashes() {
+        assert_eq!(
+            format_model_name("org/team/model"),
+            "models--org--team--model"
+        );
+    }
+
+    #[test]
+    fn test_format_model_name_no_slash() {
+        assert_eq!(
+            format_model_name("model"),
+            "models--model"
+        );
+    }
+
+    #[test]
+    fn test_format_model_name_special_chars() {
+        assert_eq!(
+            format_model_name("InftyAI/tiny-random-gpt2"),
+            "models--InftyAI--tiny-random-gpt2"
+        );
+    }
 }

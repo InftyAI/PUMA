@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use sysinfo::System;
 
 use crate::registry::model_registry::ModelRegistry;
-use crate::util::file;
-use crate::util::format::format_size;
+use crate::utils::file;
+use crate::utils::format::format_size;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {

@@ -5,7 +5,7 @@ use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
-use crate::util::format::{format_size_decimal, format_time_ago};
+use crate::utils::format::{format_size_decimal, format_time_ago};
 
 #[derive(Parser)]
 #[command(name = "PUMA")]

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::util::file;
+use crate::utils::file;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelInfo {

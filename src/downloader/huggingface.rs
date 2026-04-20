@@ -6,7 +6,7 @@ use hf_hub::api::tokio::{ApiBuilder, Progress};
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
 use crate::registry::model_registry::{ModelInfo, ModelRegistry};
-use crate::util::file;
+use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
 #[derive(Clone)]
@@ -95,7 +95,7 @@ impl Downloader for HuggingFaceDownloader {
         let progress_manager = DownloadProgressManager::new(max_filename_len);
 
         // Calculate cache paths
-        let model_cache_path = cache_dir.join(format!("models--{}", name.replace("/", "--")));
+        let model_cache_path = cache_dir.join(format_model_name(name));
         let sha = model_info.sha.clone();
         let snapshot_path = model_cache_path.join("snapshots").join(&sha);
 
@@ -150,7 +150,7 @@ impl Downloader for HuggingFaceDownloader {
 
         // Get accumulated size from downloads
         let downloaded_size = progress_manager.total_downloaded_bytes();
-        let model_cache_path = cache_dir.join(format!("models--{}", name.replace("/", "--")));
+        let model_cache_path = cache_dir.join(format_model_name(name));
 
         // Register the model
         let model_info_record = ModelInfo {
