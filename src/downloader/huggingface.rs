@@ -118,7 +118,8 @@ impl Downloader for HuggingFaceDownloader {
                     debug!("File {} found in cache, showing as complete", filename);
 
                     // Create progress bar for cached file (no speed display)
-                    let mut file_progress = progress_manager_clone.create_cached_file_progress(&filename);
+                    let mut file_progress =
+                        progress_manager_clone.create_cached_file_progress(&filename);
                     let file_size = cached_file_path.metadata().map(|m| m.len()).unwrap_or(0);
                     file_progress.init(file_size);
                     file_progress.update(file_size);
