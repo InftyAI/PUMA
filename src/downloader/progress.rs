@@ -22,6 +22,7 @@ pub struct DownloadProgressManager {
     multi_progress: Arc<MultiProgress>,
     total_size: Arc<AtomicU64>,
     style: ProgressStyle,
+    cached_style: ProgressStyle,
 }
 
 impl DownloadProgressManager {
@@ -30,7 +31,7 @@ impl DownloadProgressManager {
         let multi_progress = Arc::new(MultiProgress::new());
 
         let template = format!(
-            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}}",
+            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}} {{bytes_per_sec}}",
             width = max_filename_len
         );
         let style = ProgressStyle::default_bar()
@@ -38,10 +39,21 @@ impl DownloadProgressManager {
             .unwrap()
             .progress_chars("▇▆▅▄▃▂▁ ");
 
+        // Cached file style without speed
+        let cached_template = format!(
+            "{{msg:<{width}}} [{{elapsed_precise}}] {{bar:60.white}} {{bytes}}/{{total_bytes}}",
+            width = max_filename_len
+        );
+        let cached_style = ProgressStyle::default_bar()
+            .template(&cached_template)
+            .unwrap()
+            .progress_chars("▇▆▅▄▃▂▁ ");
+
         Self {
             multi_progress,
             total_size: Arc::new(AtomicU64::new(0)),
             style,
+            cached_style,
         }
     }
 
@@ -49,6 +61,18 @@ impl DownloadProgressManager {
     pub fn create_file_progress(&self, filename: &str) -> FileProgress {
         let pb = self.multi_progress.add(ProgressBar::hidden());
         pb.set_style(self.style.clone());
+        pb.set_message(filename.to_string());
+
+        FileProgress {
+            pb,
+            total_size: Arc::clone(&self.total_size),
+        }
+    }
+
+    /// Create a new progress bar for a cached file (no speed display)
+    pub fn create_cached_file_progress(&self, filename: &str) -> FileProgress {
+        let pb = self.multi_progress.add(ProgressBar::hidden());
+        pb.set_style(self.cached_style.clone());
         pb.set_message(filename.to_string());
 
         FileProgress {
