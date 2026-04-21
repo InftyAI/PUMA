@@ -11,7 +11,7 @@ pub struct ModelInfo {
     pub provider: String,
     pub revision: String,
     pub size: u64,
-    pub created_at: String,
+    pub modified_at: String,
     pub cache_path: String,
 }
 
@@ -122,7 +122,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
         };
 
@@ -143,7 +143,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
         };
 
@@ -164,7 +164,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
         };
 
@@ -198,7 +198,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
         };
 
@@ -209,7 +209,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "def456".to_string(),
             size: 2000,
-            created_at: "2025-01-02T00:00:00Z".to_string(),
+            modified_at: "2025-01-02T00:00:00Z".to_string(),
             cache_path: "/tmp/test2".to_string(),
         };
 
@@ -236,7 +236,7 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: cache_dir.to_string_lossy().to_string(),
         };
 
