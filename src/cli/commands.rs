@@ -89,7 +89,7 @@ pub async fn run(cli: Cli) {
 
             let mut table = Table::new();
             table.set_format(*format::consts::FORMAT_CLEAN);
-            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "CREATED"]);
+            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "MODIFIED"]);
 
             for model in models {
                 let size_str = format_size_decimal(model.size);
@@ -100,7 +100,7 @@ pub async fn run(cli: Cli) {
                     &model.revision
                 };
 
-                let created_str = format_time_ago(&model.created_at);
+                let created_str = format_time_ago(&model.modified_at);
 
                 table.add_row(row![
                     model.name,

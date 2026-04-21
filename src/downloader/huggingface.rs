@@ -99,6 +99,12 @@ impl Downloader for HuggingFaceDownloader {
         let sha = model_info.sha.clone();
         let snapshot_path = model_cache_path.join("snapshots").join(&sha);
 
+        // Check if all files are already cached
+        let model_totally_cached = model_info
+            .siblings
+            .iter()
+            .all(|sibling| snapshot_path.join(&sibling.rfilename).exists());
+
         // Process all files in manifest order (cached files show as instantly complete)
         let mut tasks = Vec::new();
 
@@ -168,14 +174,16 @@ impl Downloader for HuggingFaceDownloader {
             provider: "huggingface".to_string(),
             revision: sha,
             size: downloaded_size,
-            created_at: chrono::Local::now().to_rfc3339(),
+            modified_at: chrono::Local::now().to_rfc3339(),
             cache_path: model_cache_path.to_string_lossy().to_string(),
         };
 
-        let registry = ModelRegistry::new(None);
-        registry
-            .register_model(model_info_record)
-            .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
+        if !model_totally_cached {
+            let registry = ModelRegistry::new(None);
+            registry
+                .register_model(model_info_record)
+                .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
+        }
 
         println!(
             "\n{} {} {} {} {:.2?}",
