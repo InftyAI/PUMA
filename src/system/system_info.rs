@@ -80,7 +80,7 @@ impl SystemInfo {
 
     fn detect_nvidia_gpus() -> Option<Vec<GpuInfo>> {
         let output = Command::new("nvidia-smi")
-            .args(&[
+            .args([
                 "--query-gpu=name,memory.total",
                 "--format=csv,noheader,nounits",
             ])
@@ -143,10 +143,10 @@ impl SystemInfo {
                         gpu_name = Some(name.to_string());
 
                         // Look for core count in the next few lines
-                        for j in (i + 1)..std::cmp::min(i + 10, lines.len()) {
-                            if lines[j].contains("Total Number of Cores:") {
+                        for line in lines.iter().skip(i + 1).take(10) {
+                            if line.contains("Total Number of Cores:") {
                                 let core_parts: Vec<&str> =
-                                    lines[j].split("Total Number of Cores:").collect();
+                                    line.split("Total Number of Cores:").collect();
                                 if core_parts.len() >= 2 {
                                     core_count = Some(core_parts[1].trim().to_string());
                                 }
