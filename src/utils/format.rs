@@ -34,6 +34,23 @@ pub fn format_size_decimal(bytes: u64) -> String {
     }
 }
 
+/// Format parameter count to human-readable format (K, M, B)
+pub fn format_parameters(count: u64) -> String {
+    const K: f64 = 1_000.0;
+    const M: f64 = 1_000_000.0;
+    const B: f64 = 1_000_000_000.0;
+
+    if count as f64 >= B {
+        format!("{:.2}B", count as f64 / B)
+    } else if count as f64 >= M {
+        format!("{:.2}M", count as f64 / M)
+    } else if count as f64 >= K {
+        format!("{:.2}K", count as f64 / K)
+    } else {
+        count.to_string()
+    }
+}
+
 /// Format RFC3339 timestamp to human-readable relative time (e.g., "2 hours ago")
 pub fn format_time_ago(timestamp: &str) -> String {
     // Try to parse as RFC3339
@@ -272,5 +289,65 @@ mod tests {
 
         // Large model (65 GB)
         assert_eq!(format_size_decimal(65_000_000_000), "65.00 GB");
+    }
+
+    #[test]
+    fn test_format_parameters_raw() {
+        assert_eq!(format_parameters(0), "0");
+        assert_eq!(format_parameters(1), "1");
+        assert_eq!(format_parameters(999), "999");
+    }
+
+    #[test]
+    fn test_format_parameters_thousands() {
+        assert_eq!(format_parameters(1_000), "1.00K");
+        assert_eq!(format_parameters(1_500), "1.50K");
+        assert_eq!(format_parameters(10_000), "10.00K");
+        assert_eq!(format_parameters(999_999), "1000.00K");
+    }
+
+    #[test]
+    fn test_format_parameters_millions() {
+        assert_eq!(format_parameters(1_000_000), "1.00M");
+        assert_eq!(format_parameters(1_500_000), "1.50M");
+        assert_eq!(format_parameters(7_000_000), "7.00M");
+        assert_eq!(format_parameters(350_000_000), "350.00M");
+    }
+
+    #[test]
+    fn test_format_parameters_billions() {
+        assert_eq!(format_parameters(1_000_000_000), "1.00B");
+        assert_eq!(format_parameters(1_500_000_000), "1.50B");
+        assert_eq!(format_parameters(7_000_000_000), "7.00B");
+        assert_eq!(format_parameters(175_000_000_000), "175.00B");
+    }
+
+    #[test]
+    fn test_format_parameters_realistic_models() {
+        // Tiny model (109K parameters)
+        assert_eq!(format_parameters(109_824), "109.82K");
+
+        // Small model (125M parameters)
+        assert_eq!(format_parameters(125_000_000), "125.00M");
+
+        // Medium model (7B parameters)
+        assert_eq!(format_parameters(7_000_000_000), "7.00B");
+
+        // Large model (70B parameters)
+        assert_eq!(format_parameters(70_000_000_000), "70.00B");
+
+        // Very large model (405B parameters)
+        assert_eq!(format_parameters(405_000_000_000), "405.00B");
+    }
+
+    #[test]
+    fn test_format_parameters_edge_cases() {
+        // Boundary between K and M
+        assert_eq!(format_parameters(999_999), "1000.00K");
+        assert_eq!(format_parameters(1_000_000), "1.00M");
+
+        // Boundary between M and B
+        assert_eq!(format_parameters(999_999_999), "1000.00M");
+        assert_eq!(format_parameters(1_000_000_000), "1.00B");
     }
 }

@@ -5,8 +5,9 @@ use hf_hub::api::tokio::{ApiBuilder, Progress};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ModelInfo, ModelRegistry};
+use crate::registry::model_registry::{ModelInfo, ModelRegistry, ModelSpec};
 use crate::utils::file::{self, format_model_name};
+use crate::utils::format::format_parameters;
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
 #[derive(Clone)]
@@ -33,6 +34,36 @@ pub struct HuggingFaceDownloader;
 impl HuggingFaceDownloader {
     pub fn new() -> Self {
         Self
+    }
+
+    fn estimate_parameters(config: &serde_json::Value) -> Option<String> {
+        // Try to extract architecture dimensions for parameter estimation
+        let n_layer = config
+            .get("n_layer")
+            .or_else(|| config.get("num_hidden_layers"))
+            .and_then(|v| v.as_u64())?;
+
+        let n_embd = config
+            .get("n_embd")
+            .or_else(|| config.get("hidden_size"))
+            .and_then(|v| v.as_u64())?;
+
+        let vocab_size = config.get("vocab_size").and_then(|v| v.as_u64())?;
+
+        let n_positions = config
+            .get("n_positions")
+            .or_else(|| config.get("max_position_embeddings"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2048);
+
+        // Rough parameter estimation for transformer models
+        // Each layer: ~12 * n_embd^2 (attention + FFN)
+        // Embeddings: vocab_size * n_embd + n_positions * n_embd
+        let layer_params = 12 * n_layer * n_embd * n_embd;
+        let embedding_params = vocab_size * n_embd + n_positions * n_embd;
+        let total_params = layer_params + embedding_params;
+
+        Some(format_parameters(total_params))
     }
 }
 
@@ -168,17 +199,73 @@ impl Downloader for HuggingFaceDownloader {
         let downloaded_size = progress_manager.total_downloaded_bytes();
         let model_cache_path = cache_dir.join(format_model_name(name));
 
-        // Register the model
-        let model_info_record = ModelInfo {
-            name: name.to_string(),
-            provider: "huggingface".to_string(),
-            revision: sha,
-            size: downloaded_size,
-            modified_at: chrono::Local::now().to_rfc3339(),
-            cache_path: model_cache_path.to_string_lossy().to_string(),
-        };
-
+        // Register the model only if not totally cached
         if !model_totally_cached {
+            // Extract architecture info from config.json
+            let config_path = snapshot_path.join("config.json");
+            let spec = if config_path.exists() {
+                match std::fs::read_to_string(&config_path) {
+                    Ok(config_content) => {
+                        match serde_json::from_str::<serde_json::Value>(&config_content) {
+                            Ok(config) => {
+                                let model_type = config
+                                    .get("model_type")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+
+                                let architectures = config
+                                    .get("architectures")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                            .collect::<Vec<String>>()
+                                    })
+                                    .filter(|v| !v.is_empty());
+
+                                let context_window = config
+                                    .get("max_position_embeddings")
+                                    .or_else(|| config.get("n_ctx"))
+                                    .or_else(|| config.get("n_positions"))
+                                    .and_then(|v| v.as_u64())
+                                    .map(|v| v as u32);
+
+                                let parameters = Self::estimate_parameters(&config);
+
+                                if model_type.is_some()
+                                    || architectures.is_some()
+                                    || context_window.is_some()
+                                    || parameters.is_some()
+                                {
+                                    Some(ModelSpec {
+                                        model_type,
+                                        architectures,
+                                        context_window,
+                                        parameters,
+                                    })
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => None,
+                        }
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
+            let model_info_record = ModelInfo {
+                name: name.to_string(),
+                provider: "huggingface".to_string(),
+                revision: sha,
+                size: downloaded_size,
+                modified_at: chrono::Local::now().to_rfc3339(),
+                cache_path: model_cache_path.to_string_lossy().to_string(),
+                spec,
+            };
+
             let registry = ModelRegistry::new(None);
             registry
                 .register_model(model_info_record)

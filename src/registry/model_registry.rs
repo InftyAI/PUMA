@@ -6,6 +6,18 @@ use std::path::PathBuf;
 use crate::utils::file;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelSpec {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub architectures: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelInfo {
     pub name: String,
     pub provider: String,
@@ -13,6 +25,8 @@ pub struct ModelInfo {
     pub size: u64,
     pub modified_at: String,
     pub cache_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec: Option<ModelSpec>,
 }
 
 pub struct ModelRegistry {
@@ -124,6 +138,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
+            spec: None,
         };
 
         registry.register_model(model.clone()).unwrap();
@@ -145,6 +160,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -166,6 +182,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -200,6 +217,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
+            spec: None,
         };
 
         registry.register_model(model1).unwrap();
@@ -211,6 +229,7 @@ mod tests {
             size: 2000,
             modified_at: "2025-01-02T00:00:00Z".to_string(),
             cache_path: "/tmp/test2".to_string(),
+            spec: None,
         };
 
         registry.register_model(model2).unwrap();
@@ -238,6 +257,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: cache_dir.to_string_lossy().to_string(),
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -262,5 +282,71 @@ mod tests {
         // Should not error when deleting non-existent model
         let result = registry.remove_model("nonexistent");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_inspect_model_with_full_spec() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/gpt-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "abc123def456".to_string(),
+            size: 7_000_000_000,
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test/gpt".to_string(),
+            spec: Some(ModelSpec {
+                model_type: Some("gpt2".to_string()),
+                architectures: Some(vec!["GPT2LMHeadModel".to_string()]),
+                context_window: Some(2048),
+                parameters: Some("7.00B".to_string()),
+            }),
+        };
+
+        registry.register_model(model).unwrap();
+
+        let retrieved = registry.get_model("test/gpt-model").unwrap();
+        assert!(retrieved.is_some());
+
+        let model_info = retrieved.unwrap();
+        assert_eq!(model_info.name, "test/gpt-model");
+        assert_eq!(model_info.provider, "huggingface");
+        assert_eq!(model_info.revision, "abc123def456");
+        assert_eq!(model_info.size, 7_000_000_000);
+
+        let spec = model_info.spec.unwrap();
+        assert_eq!(spec.model_type, Some("gpt2".to_string()));
+        assert_eq!(
+            spec.architectures,
+            Some(vec!["GPT2LMHeadModel".to_string()])
+        );
+        assert_eq!(spec.context_window, Some(2048));
+        assert_eq!(spec.parameters, Some("7.00B".to_string()));
+    }
+
+    #[test]
+    fn test_inspect_model_without_spec() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/legacy-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "legacy123".to_string(),
+            size: 1_000_000,
+            modified_at: "2024-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test/legacy".to_string(),
+            spec: None,
+        };
+
+        registry.register_model(model).unwrap();
+
+        let retrieved = registry.get_model("test/legacy-model").unwrap();
+        assert!(retrieved.is_some());
+
+        let model_info = retrieved.unwrap();
+        assert_eq!(model_info.name, "test/legacy-model");
+        assert!(model_info.spec.is_none());
     }
 }

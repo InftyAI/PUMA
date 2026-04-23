@@ -184,8 +184,28 @@ pub async fn run(cli: Cli) {
 
             match registry.get_model(&args.model) {
                 Ok(Some(model)) => {
-                    println!("Model Information:");
-                    println!("  Name:           {}", model.name);
+                    println!("Name: {}", model.name);
+                    println!("Kind: Model");
+
+                    // Spec section (only if info is available)
+                    if let Some(spec) = &model.spec {
+                        println!("Spec:");
+                        if let Some(model_type) = &spec.model_type {
+                            println!("  Model Type:     {}", model_type);
+                        }
+                        if let Some(architectures) = &spec.architectures {
+                            println!("  Architectures:  {}", architectures.join(", "));
+                        }
+                        if let Some(parameters) = &spec.parameters {
+                            println!("  Parameters:     {}", parameters);
+                        }
+                        if let Some(context_window) = spec.context_window {
+                            println!("  Context Window: {}", context_window);
+                        }
+                    }
+
+                    // Registry section
+                    println!("Registry:");
                     println!("  Provider:       {}", model.provider);
                     println!("  Revision:       {}", model.revision);
                     println!("  Size:           {}", format_size_decimal(model.size));
