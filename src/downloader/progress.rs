@@ -85,6 +85,19 @@ impl DownloadProgressManager {
     pub fn total_downloaded_bytes(&self) -> u64 {
         self.total_size.load(Ordering::Relaxed)
     }
+
+    /// Create a spinner progress bar (for post-download operations)
+    pub fn create_spinner(&self) -> ProgressBar {
+        let pb = self.multi_progress.add(ProgressBar::new_spinner());
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                .template("{spinner} ")
+                .unwrap(),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        pb
+    }
 }
 
 /// Tracks progress for a single file download

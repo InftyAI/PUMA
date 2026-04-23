@@ -2,10 +2,11 @@ use colored::Colorize;
 use log::debug;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ModelInfo, ModelRegistry};
+use crate::registry::model_registry::{ModelArchitecture, ModelInfo, ModelRegistry};
 use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
@@ -62,7 +63,15 @@ impl Downloader for HuggingFaceDownloader {
                 DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
             })?;
 
-        println!("🐆 pulling manifest");
+        // Create a simple spinner for manifest pulling
+        let manifest_spinner = ProgressBar::new_spinner();
+        manifest_spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                .template("pulling manifest {spinner:.white}")
+                .unwrap(),
+        );
+        manifest_spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
         // Download the entire model repository using snapshot download
         let repo = api.model(name.to_string());
@@ -81,6 +90,10 @@ impl Downloader for HuggingFaceDownloader {
             }
         })?;
 
+        // Stop manifest spinner and print clean message
+        manifest_spinner.finish_and_clear();
+        println!("pulling manifest");
+
         debug!("Model info for {}: {:?}", name, model_info);
 
         // Calculate the longest filename for proper alignment
@@ -91,6 +104,8 @@ impl Downloader for HuggingFaceDownloader {
             .max()
             .unwrap_or(30);
 
+        // Add extra space for "pulling " prefix
+        let max_filename_len = max_filename_len + 8;
         // Create progress manager
         let progress_manager = DownloadProgressManager::new(max_filename_len);
 
@@ -124,8 +139,9 @@ impl Downloader for HuggingFaceDownloader {
                     debug!("File {} found in cache, showing as complete", filename);
 
                     // Create progress bar for cached file (no speed display)
+                    let display_name = format!("pulling {}", filename);
                     let mut file_progress =
-                        progress_manager_clone.create_cached_file_progress(&filename);
+                        progress_manager_clone.create_cached_file_progress(&display_name);
                     let file_size = cached_file_path.metadata().map(|m| m.len()).unwrap_or(0);
                     file_progress.init(file_size);
                     file_progress.update(file_size);
@@ -136,7 +152,8 @@ impl Downloader for HuggingFaceDownloader {
 
                 // File not in cache, download with progress
                 debug!("Downloading: {}", filename);
-                let file_progress = progress_manager_clone.create_file_progress(&filename);
+                let display_name = format!("pulling {}", filename);
+                let file_progress = progress_manager_clone.create_file_progress(&display_name);
                 let progress = HfProgressAdapter {
                     progress: file_progress,
                 };
@@ -156,10 +173,25 @@ impl Downloader for HuggingFaceDownloader {
             tasks.push(task);
         }
 
+        // Give tasks a moment to start and create their progress bars
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Show spinner at the bottom after all progress bars are created (only if not fully cached)
+        let spinner = if !model_totally_cached {
+            Some(progress_manager.create_spinner())
+        } else {
+            None
+        };
+
         // Wait for all downloads to complete
         for task in tasks {
             task.await
                 .map_err(|e| DownloadError::ApiError(format!("Task join error: {}", e)))??;
+        }
+
+        // Finish spinner after downloads complete
+        if let Some(spinner) = &spinner {
+            spinner.finish_and_clear();
         }
 
         let elapsed_time = start_time.elapsed();
@@ -168,25 +200,38 @@ impl Downloader for HuggingFaceDownloader {
         let downloaded_size = progress_manager.total_downloaded_bytes();
         let model_cache_path = cache_dir.join(format_model_name(name));
 
-        // Register the model
-        let model_info_record = ModelInfo {
-            name: name.to_string(),
-            provider: "huggingface".to_string(),
-            revision: sha,
-            size: downloaded_size,
-            modified_at: chrono::Local::now().to_rfc3339(),
-            cache_path: model_cache_path.to_string_lossy().to_string(),
-        };
-
+        // Register the model only if not totally cached
         if !model_totally_cached {
+            // Extract architecture info from config.json
+            let config_path = snapshot_path.join("config.json");
+            let arch = if config_path.exists() {
+                std::fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                    .and_then(|config| ModelArchitecture::from_config(&config))
+            } else {
+                None
+            };
+
+            let model_info_record = ModelInfo {
+                name: name.to_string(),
+                provider: "huggingface".to_string(),
+                revision: sha,
+                size: downloaded_size,
+                modified_at: chrono::Local::now().to_rfc3339(),
+                cache_path: model_cache_path.to_string_lossy().to_string(),
+                arch,
+            };
+
             let registry = ModelRegistry::new(None);
             registry
                 .register_model(model_info_record)
                 .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
         }
 
+        // Print success message
         println!(
-            "\n{} {} {} {} {:.2?}",
+            "{} {} {} {} {:.2?}",
             "✓".green().bold(),
             "Successfully downloaded model".bright_white(),
             name.cyan().bold(),

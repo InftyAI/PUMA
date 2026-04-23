@@ -33,7 +33,7 @@ enum Commands {
     /// Display system-wide information
     INFO,
     /// Return detailed information about a model
-    INSPECT,
+    INSPECT(InspectArgs),
     /// Returns the version of PUMA.
     VERSION,
 }
@@ -58,6 +58,12 @@ struct RmArgs {
     model: String,
 }
 
+#[derive(Parser)]
+struct InspectArgs {
+    /// Model name to inspect (e.g., InftyAI/tiny-random-gpt2)
+    model: String,
+}
+
 #[derive(Debug, Clone, Default, clap::ValueEnum)]
 pub enum Provider {
     #[default]
@@ -70,7 +76,12 @@ pub async fn run(cli: Cli) {
     match cli.command {
         Commands::PS => {
             let mut table = Table::new();
-            table.set_format(*format::consts::FORMAT_CLEAN);
+            table.set_format(
+                format::FormatBuilder::new()
+                    .column_separator(' ')
+                    .padding(0, 1)
+                    .build(),
+            );
             table.add_row(row!["NAME", "PROVIDER", "MODEL", "STATUS", "AGE"]);
             table.add_row(row![
                 "deepseek-r1",
@@ -88,7 +99,12 @@ pub async fn run(cli: Cli) {
             let models = registry.load_models().unwrap_or_default();
 
             let mut table = Table::new();
-            table.set_format(*format::consts::FORMAT_CLEAN);
+            table.set_format(
+                format::FormatBuilder::new()
+                    .column_separator(' ')
+                    .padding(0, 1)
+                    .build(),
+            );
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "MODIFIED"]);
 
             for model in models {
@@ -163,8 +179,51 @@ pub async fn run(cli: Cli) {
             info.display();
         }
 
-        Commands::INSPECT => {
-            println!("Returning detailed information about model...");
+        Commands::INSPECT(args) => {
+            let registry = ModelRegistry::new(None);
+
+            match registry.get_model(&args.model) {
+                Ok(Some(model)) => {
+                    println!("Name: {}", model.name);
+                    println!("Kind: Model");
+
+                    println!("Spec:");
+                    // Architecture section (only if info is available)
+                    if let Some(arch) = &model.arch {
+                        println!("  Architecture:");
+                        if let Some(model_type) = &arch.model_type {
+                            println!("    Type:           {}", model_type);
+                        }
+                        if let Some(classes) = &arch.classes {
+                            println!("    Classes:        {}", classes.join(", "));
+                        }
+                        if let Some(parameters) = &arch.parameters {
+                            println!("    Parameters:     {}", parameters);
+                        }
+                        if let Some(context_window) = arch.context_window {
+                            println!("    Context Window: {}", context_window);
+                        }
+                    }
+                    // Registry section
+                    println!("  Registry:");
+                    println!("    Provider:       {}", model.provider);
+                    println!("    Revision:       {}", model.revision);
+                    println!("    Size:           {}", format_size_decimal(model.size));
+                    println!(
+                        "    Modified:       {}",
+                        format_time_ago(&model.modified_at)
+                    );
+                    println!("    Cache Path:     {}", model.cache_path);
+                }
+                Ok(None) => {
+                    eprintln!("Model not found: {}", args.model);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to load registry: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
 
         Commands::VERSION => {
