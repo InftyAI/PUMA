@@ -7,26 +7,26 @@ use crate::utils::file;
 use crate::utils::format::format_parameters;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ModelSpec {
+pub struct ModelArchitecture {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub architectures: Option<Vec<String>>,
+    pub classes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<String>,
 }
 
-impl ModelSpec {
-    /// Extract model spec from config.json
+impl ModelArchitecture {
+    /// Extract model architecture from config.json
     pub fn from_config(config: &serde_json::Value) -> Option<Self> {
         let model_type = config
             .get("model_type")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let architectures = config
+        let classes = config
             .get("architectures")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -46,13 +46,13 @@ impl ModelSpec {
         let parameters = Self::estimate_parameters(config);
 
         if model_type.is_some()
-            || architectures.is_some()
+            || classes.is_some()
             || context_window.is_some()
             || parameters.is_some()
         {
-            Some(ModelSpec {
+            Some(ModelArchitecture {
                 model_type,
-                architectures,
+                classes,
                 context_window,
                 parameters,
             })
@@ -101,7 +101,7 @@ pub struct ModelInfo {
     pub modified_at: String,
     pub cache_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub spec: Option<ModelSpec>,
+    pub arch: Option<ModelArchitecture>,
 }
 
 pub struct ModelRegistry {
@@ -213,7 +213,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model.clone()).unwrap();
@@ -235,7 +235,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model).unwrap();
@@ -257,7 +257,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model).unwrap();
@@ -292,7 +292,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model1).unwrap();
@@ -304,7 +304,7 @@ mod tests {
             size: 2000,
             modified_at: "2025-01-02T00:00:00Z".to_string(),
             cache_path: "/tmp/test2".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model2).unwrap();
@@ -332,7 +332,7 @@ mod tests {
             size: 1000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: cache_dir.to_string_lossy().to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model).unwrap();
@@ -371,9 +371,9 @@ mod tests {
             size: 7_000_000_000,
             modified_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/gpt".to_string(),
-            spec: Some(ModelSpec {
+            arch: Some(ModelArchitecture {
                 model_type: Some("gpt2".to_string()),
-                architectures: Some(vec!["GPT2LMHeadModel".to_string()]),
+                classes: Some(vec!["GPT2LMHeadModel".to_string()]),
                 context_window: Some(2048),
                 parameters: Some("7.00B".to_string()),
             }),
@@ -412,7 +412,7 @@ mod tests {
             size: 1_000_000,
             modified_at: "2024-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/legacy".to_string(),
-            spec: None,
+            arch: None,
         };
 
         registry.register_model(model).unwrap();
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_spec_from_config_gpt2() {
+    fn test_model_architecture_from_config_gpt2() {
         use serde_json::json;
 
         let config = json!({
@@ -438,7 +438,7 @@ mod tests {
             "n_positions": 512
         });
 
-        let spec = ModelSpec::from_config(&config);
+        let spec = ModelArchitecture::from_config(&config);
         assert!(spec.is_some());
 
         let spec = spec.unwrap();
@@ -449,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_spec_from_config_bert_style() {
+    fn test_model_architecture_from_config_bert_style() {
         use serde_json::json;
 
         let config = json!({
@@ -460,7 +460,7 @@ mod tests {
             "max_position_embeddings": 512
         });
 
-        let spec = ModelSpec::from_config(&config);
+        let spec = ModelArchitecture::from_config(&config);
         assert!(spec.is_some());
 
         let spec = spec.unwrap();
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_spec_from_config_partial() {
+    fn test_model_architecture_from_config_partial() {
         use serde_json::json;
 
         let config = json!({
@@ -478,7 +478,7 @@ mod tests {
             "n_ctx": 4096
         });
 
-        let spec = ModelSpec::from_config(&config);
+        let spec = ModelArchitecture::from_config(&config);
         assert!(spec.is_some());
 
         let spec = spec.unwrap();
@@ -488,11 +488,11 @@ mod tests {
     }
 
     #[test]
-    fn test_model_spec_from_config_empty() {
+    fn test_model_architecture_from_config_empty() {
         use serde_json::json;
 
         let config = json!({});
-        let spec = ModelSpec::from_config(&config);
+        let spec = ModelArchitecture::from_config(&config);
         assert_eq!(spec, None);
     }
 }

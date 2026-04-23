@@ -187,30 +187,33 @@ pub async fn run(cli: Cli) {
                     println!("Name: {}", model.name);
                     println!("Kind: Model");
 
-                    // Spec section (only if info is available)
-                    if let Some(spec) = &model.spec {
-                        println!("Spec:");
-                        if let Some(model_type) = &spec.model_type {
-                            println!("  Model Type:     {}", model_type);
+                    println!("Spec:");
+                    // Architecture section (only if info is available)
+                    if let Some(arch) = &model.arch {
+                        println!("  Architecture:");
+                        if let Some(model_type) = &arch.model_type {
+                            println!("    Type:           {}", model_type);
                         }
-                        if let Some(architectures) = &spec.architectures {
-                            println!("  Architectures:  {}", architectures.join(", "));
+                        if let Some(classes) = &arch.classes {
+                            println!("    Classes:        {}", classes.join(", "));
                         }
-                        if let Some(parameters) = &spec.parameters {
-                            println!("  Parameters:     {}", parameters);
+                        if let Some(parameters) = &arch.parameters {
+                            println!("    Parameters:     {}", parameters);
                         }
-                        if let Some(context_window) = spec.context_window {
-                            println!("  Context Window: {}", context_window);
+                        if let Some(context_window) = arch.context_window {
+                            println!("    Context Window: {}", context_window);
                         }
                     }
-
                     // Registry section
-                    println!("Registry:");
-                    println!("  Provider:       {}", model.provider);
-                    println!("  Revision:       {}", model.revision);
-                    println!("  Size:           {}", format_size_decimal(model.size));
-                    println!("  Modified:       {}", format_time_ago(&model.modified_at));
-                    println!("  Cache Path:     {}", model.cache_path);
+                    println!("  Registry:");
+                    println!("    Provider:       {}", model.provider);
+                    println!("    Revision:       {}", model.revision);
+                    println!("    Size:           {}", format_size_decimal(model.size));
+                    println!(
+                        "    Modified:       {}",
+                        format_time_ago(&model.modified_at)
+                    );
+                    println!("    Cache Path:     {}", model.cache_path);
                 }
                 Ok(None) => {
                     eprintln!("Model not found: {}", args.model);

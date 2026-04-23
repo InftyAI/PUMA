@@ -6,7 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ModelInfo, ModelRegistry, ModelSpec};
+use crate::registry::model_registry::{ModelInfo, ModelRegistry, ModelArchitecture};
 use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
@@ -204,11 +204,11 @@ impl Downloader for HuggingFaceDownloader {
         if !model_totally_cached {
             // Extract architecture info from config.json
             let config_path = snapshot_path.join("config.json");
-            let spec = if config_path.exists() {
+            let arch = if config_path.exists() {
                 std::fs::read_to_string(&config_path)
                     .ok()
                     .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-                    .and_then(|config| ModelSpec::from_config(&config))
+                    .and_then(|config| ModelArchitecture::from_config(&config))
             } else {
                 None
             };
@@ -220,7 +220,7 @@ impl Downloader for HuggingFaceDownloader {
                 size: downloaded_size,
                 modified_at: chrono::Local::now().to_rfc3339(),
                 cache_path: model_cache_path.to_string_lossy().to_string(),
-                spec,
+                arch,
             };
 
             let registry = ModelRegistry::new(None);
