@@ -272,7 +272,6 @@ impl SystemInfo {
             }
         }
 
-        println!();
         println!("PUMA Information:");
         println!("  PUMA Version:       {}", self.version);
         println!("  Cache Directory:    {}", self.cache_dir);

@@ -68,7 +68,7 @@ PUMA Information:
 | `stop` | 🚧 | Stop a running model | `puma stop <model-id>` |
 | `rm` | ✅ | Remove a model | `puma rm InftyAI/tiny-random-gpt2` |
 | `info` | ✅ | Display system-wide information | `puma info` |
-| `inspect` | 🚧 | Return detailed information about a model or service | `puma inspect InftyAI/tiny-random-gpt2` |
+| `inspect` | ✅ | Return detailed information about a model or service | `puma inspect InftyAI/tiny-random-gpt2` |
 | `version` | ✅ | Show PUMA version | `puma version` |
 | `help` | ✅ | Show help information | `puma help` |
 
