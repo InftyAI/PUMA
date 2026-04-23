@@ -2,6 +2,7 @@ use colored::Colorize;
 use log::debug;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
@@ -93,7 +94,15 @@ impl Downloader for HuggingFaceDownloader {
                 DownloadError::ApiError(format!("Failed to initialize Hugging Face API: {}", e))
             })?;
 
-        println!("🐆 pulling manifest");
+        // Create a simple spinner for manifest pulling
+        let manifest_spinner = ProgressBar::new_spinner();
+        manifest_spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                .template("pulling manifest {spinner:.white}")
+                .unwrap(),
+        );
+        manifest_spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
         // Download the entire model repository using snapshot download
         let repo = api.model(name.to_string());
@@ -111,6 +120,10 @@ impl Downloader for HuggingFaceDownloader {
                 DownloadError::ApiError(format!("Failed to fetch model info: {}", e))
             }
         })?;
+
+        // Stop manifest spinner and print clean message
+        manifest_spinner.finish_and_clear();
+        println!("🐆 pulling manifest");
 
         debug!("Model info for {}: {:?}", name, model_info);
 
@@ -187,10 +200,25 @@ impl Downloader for HuggingFaceDownloader {
             tasks.push(task);
         }
 
+        // Give tasks a moment to start and create their progress bars
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Show spinner at the bottom after all progress bars are created (only if not fully cached)
+        let spinner = if !model_totally_cached {
+            Some(progress_manager.create_spinner())
+        } else {
+            None
+        };
+
         // Wait for all downloads to complete
         for task in tasks {
             task.await
                 .map_err(|e| DownloadError::ApiError(format!("Task join error: {}", e)))??;
+        }
+
+        // Finish spinner after downloads complete
+        if let Some(spinner) = &spinner {
+            spinner.finish_and_clear();
         }
 
         let elapsed_time = start_time.elapsed();
@@ -272,8 +300,9 @@ impl Downloader for HuggingFaceDownloader {
                 .map_err(|e| DownloadError::ApiError(format!("Failed to register model: {}", e)))?;
         }
 
+        // Print success message
         println!(
-            "\n{} {} {} {} {:.2?}",
+            "{} {} {} {} {:.2?}",
             "✓".green().bold(),
             "Successfully downloaded model".bright_white(),
             name.cyan().bold(),
