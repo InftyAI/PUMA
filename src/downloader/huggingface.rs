@@ -123,7 +123,7 @@ impl Downloader for HuggingFaceDownloader {
 
         // Stop manifest spinner and print clean message
         manifest_spinner.finish_and_clear();
-        println!("🐆 pulling manifest");
+        println!("pulling manifest");
 
         debug!("Model info for {}: {:?}", name, model_info);
 
@@ -135,6 +135,8 @@ impl Downloader for HuggingFaceDownloader {
             .max()
             .unwrap_or(30);
 
+        // Add extra space for "pulling " prefix
+        let max_filename_len = max_filename_len + 8;
         // Create progress manager
         let progress_manager = DownloadProgressManager::new(max_filename_len);
 
@@ -168,8 +170,9 @@ impl Downloader for HuggingFaceDownloader {
                     debug!("File {} found in cache, showing as complete", filename);
 
                     // Create progress bar for cached file (no speed display)
+                    let display_name = format!("pulling {}", filename);
                     let mut file_progress =
-                        progress_manager_clone.create_cached_file_progress(&filename);
+                        progress_manager_clone.create_cached_file_progress(&display_name);
                     let file_size = cached_file_path.metadata().map(|m| m.len()).unwrap_or(0);
                     file_progress.init(file_size);
                     file_progress.update(file_size);
@@ -180,7 +183,8 @@ impl Downloader for HuggingFaceDownloader {
 
                 // File not in cache, download with progress
                 debug!("Downloading: {}", filename);
-                let file_progress = progress_manager_clone.create_file_progress(&filename);
+                let display_name = format!("pulling {}", filename);
+                let file_progress = progress_manager_clone.create_file_progress(&display_name);
                 let progress = HfProgressAdapter {
                     progress: file_progress,
                 };
