@@ -51,7 +51,6 @@ pub fn format_parameters(count: u64) -> String {
     }
 }
 
-
 /// Format RFC3339 timestamp to human-readable relative time (e.g., "2 hours ago")
 pub fn format_time_ago(timestamp: &str) -> String {
     // Try to parse as RFC3339
@@ -351,5 +350,4 @@ mod tests {
         assert_eq!(format_parameters(999_999_999), "1000.00M");
         assert_eq!(format_parameters(1_000_000_000), "1.00B");
     }
-
 }

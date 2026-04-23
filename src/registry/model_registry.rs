@@ -392,10 +392,7 @@ mod tests {
 
         let arch = model_info.arch.unwrap();
         assert_eq!(arch.model_type, Some("gpt2".to_string()));
-        assert_eq!(
-            arch.classes,
-            Some(vec!["GPT2LMHeadModel".to_string()])
-        );
+        assert_eq!(arch.classes, Some(vec!["GPT2LMHeadModel".to_string()]));
         assert_eq!(arch.context_window, Some(2048));
         assert_eq!(arch.parameters, Some("7.00B".to_string()));
     }

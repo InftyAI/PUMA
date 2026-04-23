@@ -93,7 +93,7 @@ impl DownloadProgressManager {
             ProgressStyle::default_spinner()
                 .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
                 .template("{spinner} ")
-                .unwrap()
+                .unwrap(),
         );
         pb.enable_steady_tick(std::time::Duration::from_millis(80));
         pb
