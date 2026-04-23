@@ -390,14 +390,14 @@ mod tests {
         assert_eq!(model_info.revision, "abc123def456");
         assert_eq!(model_info.size, 7_000_000_000);
 
-        let spec = model_info.spec.unwrap();
-        assert_eq!(spec.model_type, Some("gpt2".to_string()));
+        let arch = model_info.arch.unwrap();
+        assert_eq!(arch.model_type, Some("gpt2".to_string()));
         assert_eq!(
-            spec.architectures,
+            arch.classes,
             Some(vec!["GPT2LMHeadModel".to_string()])
         );
-        assert_eq!(spec.context_window, Some(2048));
-        assert_eq!(spec.parameters, Some("7.00B".to_string()));
+        assert_eq!(arch.context_window, Some(2048));
+        assert_eq!(arch.parameters, Some("7.00B".to_string()));
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
 
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/legacy-model");
-        assert!(model_info.spec.is_none());
+        assert!(model_info.arch.is_none());
     }
 
     #[test]
@@ -438,14 +438,14 @@ mod tests {
             "n_positions": 512
         });
 
-        let spec = ModelArchitecture::from_config(&config);
-        assert!(spec.is_some());
+        let arch = ModelArchitecture::from_config(&config);
+        assert!(arch.is_some());
 
-        let spec = spec.unwrap();
-        assert_eq!(spec.model_type, Some("gpt2".to_string()));
-        assert_eq!(spec.architectures, Some(vec!["GPT2LMHeadModel".to_string()]));
-        assert_eq!(spec.context_window, Some(512));
-        assert_eq!(spec.parameters, Some("109.82K".to_string()));
+        let arch = arch.unwrap();
+        assert_eq!(arch.model_type, Some("gpt2".to_string()));
+        assert_eq!(arch.classes, Some(vec!["GPT2LMHeadModel".to_string()]));
+        assert_eq!(arch.context_window, Some(512));
+        assert_eq!(arch.parameters, Some("109.82K".to_string()));
     }
 
     #[test]
@@ -460,13 +460,13 @@ mod tests {
             "max_position_embeddings": 512
         });
 
-        let spec = ModelArchitecture::from_config(&config);
-        assert!(spec.is_some());
+        let arch = ModelArchitecture::from_config(&config);
+        assert!(arch.is_some());
 
-        let spec = spec.unwrap();
-        assert_eq!(spec.model_type, Some("bert".to_string()));
-        assert_eq!(spec.context_window, Some(512));
-        assert!(spec.parameters.unwrap().contains("M"));
+        let arch = arch.unwrap();
+        assert_eq!(arch.model_type, Some("bert".to_string()));
+        assert_eq!(arch.context_window, Some(512));
+        assert!(arch.parameters.unwrap().contains("M"));
     }
 
     #[test]
@@ -478,13 +478,13 @@ mod tests {
             "n_ctx": 4096
         });
 
-        let spec = ModelArchitecture::from_config(&config);
-        assert!(spec.is_some());
+        let arch = ModelArchitecture::from_config(&config);
+        assert!(arch.is_some());
 
-        let spec = spec.unwrap();
-        assert_eq!(spec.model_type, Some("llama".to_string()));
-        assert_eq!(spec.context_window, Some(4096));
-        assert_eq!(spec.parameters, None);
+        let arch = arch.unwrap();
+        assert_eq!(arch.model_type, Some("llama".to_string()));
+        assert_eq!(arch.context_window, Some(4096));
+        assert_eq!(arch.parameters, None);
     }
 
     #[test]
@@ -492,7 +492,7 @@ mod tests {
         use serde_json::json;
 
         let config = json!({});
-        let spec = ModelArchitecture::from_config(&config);
-        assert_eq!(spec, None);
+        let arch = ModelArchitecture::from_config(&config);
+        assert_eq!(arch, None);
     }
 }
