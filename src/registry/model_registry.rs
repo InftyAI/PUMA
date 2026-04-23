@@ -4,8 +4,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::utils::file;
+use crate::utils::format::format_parameters;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ModelSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_type: Option<String>,
@@ -15,6 +16,80 @@ pub struct ModelSpec {
     pub context_window: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<String>,
+}
+
+impl ModelSpec {
+    /// Extract model spec from config.json
+    pub fn from_config(config: &serde_json::Value) -> Option<Self> {
+        let model_type = config
+            .get("model_type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let architectures = config
+            .get("architectures")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<String>>()
+            })
+            .filter(|v| !v.is_empty());
+
+        let context_window = config
+            .get("n_positions")
+            .or_else(|| config.get("max_position_embeddings"))
+            .or_else(|| config.get("n_ctx"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+
+        let parameters = Self::estimate_parameters(config);
+
+        if model_type.is_some()
+            || architectures.is_some()
+            || context_window.is_some()
+            || parameters.is_some()
+        {
+            Some(ModelSpec {
+                model_type,
+                architectures,
+                context_window,
+                parameters,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Estimate model parameters from config
+    fn estimate_parameters(config: &serde_json::Value) -> Option<String> {
+        let n_layer = config
+            .get("n_layer")
+            .or_else(|| config.get("num_hidden_layers"))
+            .and_then(|v| v.as_u64())?;
+
+        let n_embd = config
+            .get("n_embd")
+            .or_else(|| config.get("hidden_size"))
+            .and_then(|v| v.as_u64())?;
+
+        let vocab_size = config.get("vocab_size").and_then(|v| v.as_u64())?;
+
+        let n_positions = config
+            .get("n_positions")
+            .or_else(|| config.get("max_position_embeddings"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2048);
+
+        // Rough parameter estimation for transformer models
+        // Each layer: ~12 * n_embd^2 (attention + FFN)
+        // Embeddings: vocab_size * n_embd + n_positions * n_embd
+        let layer_params = 12 * n_layer * n_embd * n_embd;
+        let embedding_params = vocab_size * n_embd + n_positions * n_embd;
+        let total_params = layer_params + embedding_params;
+
+        Some(format_parameters(total_params))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -348,5 +423,76 @@ mod tests {
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/legacy-model");
         assert!(model_info.spec.is_none());
+    }
+
+    #[test]
+    fn test_model_spec_from_config_gpt2() {
+        use serde_json::json;
+
+        let config = json!({
+            "model_type": "gpt2",
+            "architectures": ["GPT2LMHeadModel"],
+            "n_layer": 5,
+            "n_embd": 32,
+            "vocab_size": 1000,
+            "n_positions": 512
+        });
+
+        let spec = ModelSpec::from_config(&config);
+        assert!(spec.is_some());
+
+        let spec = spec.unwrap();
+        assert_eq!(spec.model_type, Some("gpt2".to_string()));
+        assert_eq!(spec.architectures, Some(vec!["GPT2LMHeadModel".to_string()]));
+        assert_eq!(spec.context_window, Some(512));
+        assert_eq!(spec.parameters, Some("109.82K".to_string()));
+    }
+
+    #[test]
+    fn test_model_spec_from_config_bert_style() {
+        use serde_json::json;
+
+        let config = json!({
+            "model_type": "bert",
+            "num_hidden_layers": 12,
+            "hidden_size": 768,
+            "vocab_size": 30000,
+            "max_position_embeddings": 512
+        });
+
+        let spec = ModelSpec::from_config(&config);
+        assert!(spec.is_some());
+
+        let spec = spec.unwrap();
+        assert_eq!(spec.model_type, Some("bert".to_string()));
+        assert_eq!(spec.context_window, Some(512));
+        assert!(spec.parameters.unwrap().contains("M"));
+    }
+
+    #[test]
+    fn test_model_spec_from_config_partial() {
+        use serde_json::json;
+
+        let config = json!({
+            "model_type": "llama",
+            "n_ctx": 4096
+        });
+
+        let spec = ModelSpec::from_config(&config);
+        assert!(spec.is_some());
+
+        let spec = spec.unwrap();
+        assert_eq!(spec.model_type, Some("llama".to_string()));
+        assert_eq!(spec.context_window, Some(4096));
+        assert_eq!(spec.parameters, None);
+    }
+
+    #[test]
+    fn test_model_spec_from_config_empty() {
+        use serde_json::json;
+
+        let config = json!({});
+        let spec = ModelSpec::from_config(&config);
+        assert_eq!(spec, None);
     }
 }
