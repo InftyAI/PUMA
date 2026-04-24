@@ -6,7 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ModelArchitecture, ModelInfo, ModelRegistry};
+use crate::registry::model_registry::{ModelInfo, ModelRegistry, ModelSpec};
 use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
@@ -34,6 +34,60 @@ pub struct HuggingFaceDownloader;
 impl HuggingFaceDownloader {
     pub fn new() -> Self {
         Self
+    }
+
+    async fn fetch_metadata_from_api(
+        model_name: &str,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<u64>,
+        Option<u64>,
+    ) {
+        let url = format!("https://huggingface.co/api/models/{}", model_name);
+        let client = reqwest::Client::new();
+
+        match client.get(&url).send().await {
+            Ok(response) => {
+                if let Ok(json) = response.json::<serde_json::Value>().await {
+                    let author = json
+                        .get("author")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let task = json
+                        .get("pipeline_tag")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let license = json
+                        .get("cardData")
+                        .and_then(|card| card.get("license"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let model_type = json
+                        .get("config")
+                        .and_then(|config| config.get("model_type"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let parameters = json
+                        .get("safetensors")
+                        .and_then(|st| st.get("total"))
+                        .and_then(|v| v.as_u64());
+
+                    let storage = json.get("usedStorage").and_then(|v| v.as_u64());
+
+                    (author, task, license, model_type, parameters, storage)
+                } else {
+                    (None, None, None, None, None, None)
+                }
+            }
+            Err(_) => (None, None, None, None, None, None),
+        }
     }
 }
 
@@ -195,34 +249,63 @@ impl Downloader for HuggingFaceDownloader {
         }
 
         let elapsed_time = start_time.elapsed();
-
-        // Get accumulated size from downloads
-        let downloaded_size = progress_manager.total_downloaded_bytes();
         let model_cache_path = cache_dir.join(format_model_name(name));
 
         // Register the model only if not totally cached
         if !model_totally_cached {
-            // Extract architecture info from config.json
+            // Fetch metadata from HuggingFace API
+            let (
+                author_from_api,
+                task_from_api,
+                license_from_api,
+                model_type_from_api,
+                parameters_from_api,
+                storage_from_api,
+            ) = Self::fetch_metadata_from_api(name).await;
+
+            // Extract context_window from config.json
             let config_path = snapshot_path.join("config.json");
-            let arch = if config_path.exists() {
+            let context_window = if config_path.exists() {
                 std::fs::read_to_string(&config_path)
                     .ok()
                     .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-                    .and_then(|config| ModelArchitecture::from_config(&config))
+                    .and_then(|config| {
+                        config
+                            .get("text_config")
+                            .and_then(|tc| tc.get("max_position_embeddings"))
+                            .or_else(|| config.get("max_position_embeddings"))
+                            .or_else(|| config.get("n_positions"))
+                            .or_else(|| config.get("n_ctx"))
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32)
+                    })
             } else {
                 None
             };
+
+            let spec = Some(ModelSpec {
+                author: author_from_api,
+                task: task_from_api,
+                license: license_from_api,
+                model_type: model_type_from_api,
+                parameters: parameters_from_api,
+                context_window,
+            });
+
+            // Use storage from API, fallback to accumulated download size
+            let model_size =
+                storage_from_api.unwrap_or_else(|| progress_manager.total_downloaded_bytes());
 
             let now = chrono::Local::now().to_rfc3339();
             let model_info_record = ModelInfo {
                 name: name.to_string(),
                 provider: "huggingface".to_string(),
                 revision: sha,
-                size: downloaded_size,
+                size: model_size,
                 created_at: now.clone(),
                 updated_at: now,
                 cache_path: model_cache_path.to_string_lossy().to_string(),
-                arch,
+                spec,
             };
 
             let registry = ModelRegistry::new(None);

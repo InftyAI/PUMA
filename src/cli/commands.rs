@@ -185,26 +185,21 @@ pub async fn run(cli: Cli) {
                 Ok(Some(model)) => {
                     println!("Name: {}", model.name);
                     println!("Kind: Model");
-                    println!("Metadata:");
-                    println!("  Created:        {}", format_time_ago(&model.created_at));
-                    println!("  Updated:        {}", format_time_ago(&model.updated_at));
-
                     println!("Spec:");
-                    // Architecture section (only if info is available)
-                    if let Some(arch) = &model.arch {
-                        println!("  Architecture:");
-                        if let Some(model_type) = &arch.model_type {
-                            println!("    Type:           {}", model_type);
-                        }
-                        if let Some(classes) = &arch.classes {
-                            println!("    Classes:        {}", classes.join(", "));
-                        }
-                        if let Some(parameters) = &arch.parameters {
-                            println!("    Parameters:     {}", parameters);
-                        }
-                        if let Some(context_window) = arch.context_window {
-                            println!("    Context Window: {}", context_window);
-                        }
+                    if let Some(spec) = &model.spec {
+                        println!("  Author:         {}", spec.author.as_deref().unwrap_or("N/A"));
+                        println!("  Task:           {}", spec.task.as_deref().unwrap_or("N/A"));
+                        println!("  License:        {}", spec.license.as_ref().map(|s| s.to_uppercase()).unwrap_or_else(|| "N/A".to_string()));
+                        println!("  Model Type:     {}", spec.model_type.as_deref().unwrap_or("N/A"));
+                        println!("  Parameters:     {}", spec.parameters.map(|p| crate::utils::format::format_parameters(p)).unwrap_or_else(|| "N/A".to_string()));
+                        println!("  Context Window: {}", spec.context_window.map(|w| crate::utils::format::format_parameters(w as u64)).unwrap_or_else(|| "N/A".to_string()));
+                    } else {
+                        println!("  Author:         N/A");
+                        println!("  Task:           N/A");
+                        println!("  License:        N/A");
+                        println!("  Model Type:     N/A");
+                        println!("  Parameters:     N/A");
+                        println!("  Context Window: N/A");
                     }
                     // Registry section
                     println!("  Registry:");
@@ -212,6 +207,9 @@ pub async fn run(cli: Cli) {
                     println!("    Revision:       {}", model.revision);
                     println!("    Size:           {}", format_size_decimal(model.size));
                     println!("    Cache Path:     {}", model.cache_path);
+                    println!("Status:");
+                    println!("  Created:        {}", format_time_ago(&model.created_at));
+                    println!("  Updated:        {}", format_time_ago(&model.updated_at));
                 }
                 Ok(None) => {
                     eprintln!("Model not found: {}", args.model);
@@ -233,7 +231,7 @@ pub async fn run(cli: Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{ModelArchitecture, ModelInfo};
+    use crate::registry::model_registry::ModelInfo;
     use tempfile::TempDir;
 
     #[test]
@@ -258,7 +256,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            arch: None,
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -282,11 +280,13 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-02T00:00:00Z".to_string(),
             cache_path: "/tmp/test/gpt".to_string(),
-            arch: Some(ModelArchitecture {
+            spec: Some(crate::registry::model_registry::ModelSpec {
                 model_type: Some("gpt2".to_string()),
-                classes: Some(vec!["GPT2LMHeadModel".to_string()]),
+                parameters: Some(7_000_000_000),
                 context_window: Some(2048),
-                parameters: Some("7.00B".to_string()),
+                author: Some("test-org".to_string()),
+                task: Some("text-generation".to_string()),
+                license: Some("mit".to_string()),
             }),
         };
 
@@ -300,11 +300,13 @@ mod tests {
         assert_eq!(model_info.created_at, "2025-01-01T00:00:00Z");
         assert_eq!(model_info.updated_at, "2025-01-02T00:00:00Z");
 
-        let arch = model_info.arch.unwrap();
-        assert_eq!(arch.model_type, Some("gpt2".to_string()));
-        assert_eq!(arch.classes, Some(vec!["GPT2LMHeadModel".to_string()]));
-        assert_eq!(arch.context_window, Some(2048));
-        assert_eq!(arch.parameters, Some("7.00B".to_string()));
+        let spec = model_info.spec.as_ref().unwrap();
+        assert_eq!(spec.author, Some("test-org".to_string()));
+        assert_eq!(spec.task, Some("text-generation".to_string()));
+        assert_eq!(spec.license, Some("mit".to_string()));
+        assert_eq!(spec.model_type, Some("gpt2".to_string()));
+        assert_eq!(spec.context_window, Some(2048));
+        assert_eq!(spec.parameters, Some(7_000_000_000));
     }
 
     #[test]
@@ -320,7 +322,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/simple".to_string(),
-            arch: None,
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -330,7 +332,7 @@ mod tests {
 
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/simple-model");
-        assert!(model_info.arch.is_none());
+        assert!(model_info.spec.is_none());
     }
 
     #[test]
@@ -346,7 +348,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/remove".to_string(),
-            arch: None,
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -400,7 +402,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            arch: None,
+            spec: None,
         };
 
         registry.register_model(model).unwrap();
@@ -414,7 +416,7 @@ mod tests {
             created_at: "2025-01-05T00:00:00Z".to_string(),
             updated_at: "2025-01-05T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
-            arch: None,
+            spec: None,
         };
 
         registry.register_model(updated_model).unwrap();
