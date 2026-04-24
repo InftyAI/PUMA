@@ -187,12 +187,37 @@ pub async fn run(cli: Cli) {
                     println!("Kind: Model");
                     println!("Spec:");
                     if let Some(spec) = &model.spec {
-                        println!("  Author:         {}", spec.author.as_deref().unwrap_or("N/A"));
-                        println!("  Task:           {}", spec.task.as_deref().unwrap_or("N/A"));
-                        println!("  License:        {}", spec.license.as_ref().map(|s| s.to_uppercase()).unwrap_or_else(|| "N/A".to_string()));
-                        println!("  Model Type:     {}", spec.model_type.as_deref().unwrap_or("N/A"));
-                        println!("  Parameters:     {}", spec.parameters.map(|p| crate::utils::format::format_parameters(p)).unwrap_or_else(|| "N/A".to_string()));
-                        println!("  Context Window: {}", spec.context_window.map(|w| crate::utils::format::format_parameters(w as u64)).unwrap_or_else(|| "N/A".to_string()));
+                        println!(
+                            "  Author:         {}",
+                            spec.author.as_deref().unwrap_or("N/A")
+                        );
+                        println!(
+                            "  Task:           {}",
+                            spec.task.as_deref().unwrap_or("N/A")
+                        );
+                        println!(
+                            "  License:        {}",
+                            spec.license
+                                .as_ref()
+                                .map(|s| s.to_uppercase())
+                                .unwrap_or_else(|| "N/A".to_string())
+                        );
+                        println!(
+                            "  Model Type:     {}",
+                            spec.model_type.as_deref().unwrap_or("N/A")
+                        );
+                        println!(
+                            "  Parameters:     {}",
+                            spec.parameters
+                                .map(crate::utils::format::format_parameters)
+                                .unwrap_or_else(|| "N/A".to_string())
+                        );
+                        println!(
+                            "  Context Window: {}",
+                            spec.context_window
+                                .map(|w| crate::utils::format::format_parameters(w as u64))
+                                .unwrap_or_else(|| "N/A".to_string())
+                        );
                     } else {
                         println!("  Author:         N/A");
                         println!("  Task:           N/A");
