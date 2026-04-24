@@ -213,12 +213,14 @@ impl Downloader for HuggingFaceDownloader {
                 None
             };
 
+            let now = chrono::Local::now().to_rfc3339();
             let model_info_record = ModelInfo {
                 name: name.to_string(),
                 provider: "huggingface".to_string(),
                 revision: sha,
                 size: downloaded_size,
-                modified_at: chrono::Local::now().to_rfc3339(),
+                created_at: now.clone(),
+                updated_at: now,
                 cache_path: model_cache_path.to_string_lossy().to_string(),
                 arch,
             };
