@@ -98,7 +98,8 @@ pub struct ModelInfo {
     pub provider: String,
     pub revision: String,
     pub size: u64,
-    pub modified_at: String,
+    pub created_at: String,
+    pub updated_at: String,
     pub cache_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arch: Option<ModelArchitecture>,
@@ -148,10 +149,22 @@ impl ModelRegistry {
     pub fn register_model(&self, model: ModelInfo) -> Result<(), std::io::Error> {
         let mut models = self.load_models()?;
 
+        // Check if model already exists to preserve created_at
+        let existing_created_at = models
+            .iter()
+            .find(|m| m.name == model.name)
+            .map(|m| m.created_at.clone());
+
         // Remove existing model with same name if exists
         models.retain(|m| m.name != model.name);
 
-        models.push(model);
+        // Use existing created_at if this is an update, otherwise use the provided one
+        let mut final_model = model;
+        if let Some(created_at) = existing_created_at {
+            final_model.created_at = created_at;
+        }
+
+        models.push(final_model);
         self.save_models(&models)?;
 
         Ok(())
@@ -211,7 +224,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
             arch: None,
         };
@@ -233,7 +247,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
             arch: None,
         };
@@ -255,7 +270,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
             arch: None,
         };
@@ -290,7 +306,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test".to_string(),
             arch: None,
         };
@@ -302,7 +319,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "def456".to_string(),
             size: 2000,
-            modified_at: "2025-01-02T00:00:00Z".to_string(),
+            created_at: "2025-01-02T00:00:00Z".to_string(),
+            updated_at: "2025-01-02T00:00:00Z".to_string(),
             cache_path: "/tmp/test2".to_string(),
             arch: None,
         };
@@ -313,6 +331,10 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].revision, "def456");
         assert_eq!(models[0].size, 2000);
+        // created_at should be preserved from model1
+        assert_eq!(models[0].created_at, "2025-01-01T00:00:00Z");
+        // updated_at should be from model2
+        assert_eq!(models[0].updated_at, "2025-01-02T00:00:00Z");
     }
 
     #[test]
@@ -330,7 +352,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123".to_string(),
             size: 1000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: cache_dir.to_string_lossy().to_string(),
             arch: None,
         };
@@ -369,7 +392,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "abc123def456".to_string(),
             size: 7_000_000_000,
-            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/gpt".to_string(),
             arch: Some(ModelArchitecture {
                 model_type: Some("gpt2".to_string()),
@@ -407,7 +431,8 @@ mod tests {
             provider: "huggingface".to_string(),
             revision: "legacy123".to_string(),
             size: 1_000_000,
-            modified_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
             cache_path: "/tmp/test/legacy".to_string(),
             arch: None,
         };

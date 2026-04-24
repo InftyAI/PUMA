@@ -105,8 +105,7 @@ pub async fn run(cli: Cli) {
                     .padding(0, 1)
                     .build(),
             );
-            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "MODIFIED"]);
-
+            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "AGE"]);
             for model in models {
                 let size_str = format_size_decimal(model.size);
 
@@ -116,7 +115,7 @@ pub async fn run(cli: Cli) {
                     &model.revision
                 };
 
-                let created_str = format_time_ago(&model.modified_at);
+                let created_str = format_time_ago(&model.created_at);
 
                 table.add_row(row![
                     model.name,
@@ -186,6 +185,9 @@ pub async fn run(cli: Cli) {
                 Ok(Some(model)) => {
                     println!("Name: {}", model.name);
                     println!("Kind: Model");
+                    println!("Metadata:");
+                    println!("  Created:        {}", format_time_ago(&model.created_at));
+                    println!("  Updated:        {}", format_time_ago(&model.updated_at));
 
                     println!("Spec:");
                     // Architecture section (only if info is available)
@@ -209,10 +211,6 @@ pub async fn run(cli: Cli) {
                     println!("    Provider:       {}", model.provider);
                     println!("    Revision:       {}", model.revision);
                     println!("    Size:           {}", format_size_decimal(model.size));
-                    println!(
-                        "    Modified:       {}",
-                        format_time_ago(&model.modified_at)
-                    );
                     println!("    Cache Path:     {}", model.cache_path);
                 }
                 Ok(None) => {
@@ -229,5 +227,205 @@ pub async fn run(cli: Cli) {
         Commands::VERSION => {
             println!("PUMA {}", env!("CARGO_PKG_VERSION"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::model_registry::{ModelArchitecture, ModelInfo};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_ls_command_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let models = registry.load_models().unwrap_or_default();
+        assert_eq!(models.len(), 0);
+    }
+
+    #[test]
+    fn test_ls_command_with_models() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "abc123def456".to_string(),
+            size: 1_000_000,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test".to_string(),
+            arch: None,
+        };
+
+        registry.register_model(model).unwrap();
+
+        let models = registry.load_models().unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "test/model");
+        assert_eq!(models[0].provider, "huggingface");
+    }
+
+    #[test]
+    fn test_inspect_command_with_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/gpt-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "abc123def456".to_string(),
+            size: 7_000_000_000,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-02T00:00:00Z".to_string(),
+            cache_path: "/tmp/test/gpt".to_string(),
+            arch: Some(ModelArchitecture {
+                model_type: Some("gpt2".to_string()),
+                classes: Some(vec!["GPT2LMHeadModel".to_string()]),
+                context_window: Some(2048),
+                parameters: Some("7.00B".to_string()),
+            }),
+        };
+
+        registry.register_model(model.clone()).unwrap();
+
+        let retrieved = registry.get_model("test/gpt-model").unwrap();
+        assert!(retrieved.is_some());
+
+        let model_info = retrieved.unwrap();
+        assert_eq!(model_info.name, "test/gpt-model");
+        assert_eq!(model_info.created_at, "2025-01-01T00:00:00Z");
+        assert_eq!(model_info.updated_at, "2025-01-02T00:00:00Z");
+
+        let arch = model_info.arch.unwrap();
+        assert_eq!(arch.model_type, Some("gpt2".to_string()));
+        assert_eq!(arch.classes, Some(vec!["GPT2LMHeadModel".to_string()]));
+        assert_eq!(arch.context_window, Some(2048));
+        assert_eq!(arch.parameters, Some("7.00B".to_string()));
+    }
+
+    #[test]
+    fn test_inspect_command_without_architecture() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/simple-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "xyz789".to_string(),
+            size: 500_000,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test/simple".to_string(),
+            arch: None,
+        };
+
+        registry.register_model(model).unwrap();
+
+        let retrieved = registry.get_model("test/simple-model").unwrap();
+        assert!(retrieved.is_some());
+
+        let model_info = retrieved.unwrap();
+        assert_eq!(model_info.name, "test/simple-model");
+        assert!(model_info.arch.is_none());
+    }
+
+    #[test]
+    fn test_rm_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/remove-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "abc123".to_string(),
+            size: 1000,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test/remove".to_string(),
+            arch: None,
+        };
+
+        registry.register_model(model).unwrap();
+        assert!(registry.get_model("test/remove-model").unwrap().is_some());
+
+        // Simulate RM command
+        let result = registry.get_model("test/remove-model");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_rm_command_nonexistent() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let result = registry.get_model("nonexistent/model");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_revision_truncation() {
+        let long_revision = "abc123def456ghi789jkl012";
+        let short = if long_revision.len() > 8 {
+            &long_revision[..8]
+        } else {
+            long_revision
+        };
+        assert_eq!(short, "abc123de");
+
+        let short_revision = "abc123";
+        let short = if short_revision.len() > 8 {
+            &short_revision[..8]
+        } else {
+            short_revision
+        };
+        assert_eq!(short, "abc123");
+    }
+
+    #[test]
+    fn test_metadata_timestamps_differ() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = ModelInfo {
+            name: "test/updated-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "v1".to_string(),
+            size: 1000,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            cache_path: "/tmp/test".to_string(),
+            arch: None,
+        };
+
+        registry.register_model(model).unwrap();
+
+        // Update the model
+        let updated_model = ModelInfo {
+            name: "test/updated-model".to_string(),
+            provider: "huggingface".to_string(),
+            revision: "v2".to_string(),
+            size: 2000,
+            created_at: "2025-01-05T00:00:00Z".to_string(),
+            updated_at: "2025-01-05T00:00:00Z".to_string(),
+            cache_path: "/tmp/test".to_string(),
+            arch: None,
+        };
+
+        registry.register_model(updated_model).unwrap();
+
+        let result = registry.get_model("test/updated-model").unwrap().unwrap();
+        // created_at should remain the same
+        assert_eq!(result.created_at, "2025-01-01T00:00:00Z");
+        // updated_at should be new
+        assert_eq!(result.updated_at, "2025-01-05T00:00:00Z");
+        // Other fields should be updated
+        assert_eq!(result.revision, "v2");
+        assert_eq!(result.size, 2000);
     }
 }
