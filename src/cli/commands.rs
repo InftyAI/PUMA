@@ -106,7 +106,6 @@ pub async fn run(cli: Cli) {
                     .build(),
             );
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "AGE"]);
-
             for model in models {
                 let size_str = format_size_decimal(model.size);
 
@@ -189,6 +188,7 @@ pub async fn run(cli: Cli) {
                     println!("Metadata:");
                     println!("  Created:        {}", format_time_ago(&model.created_at));
                     println!("  Updated:        {}", format_time_ago(&model.updated_at));
+
                     println!("Spec:");
                     // Architecture section (only if info is available)
                     if let Some(arch) = &model.arch {
