@@ -34,8 +34,11 @@ impl SqliteStorage {
                     updated_at TEXT NOT NULL,
                     CHECK(json_valid(metadata))
                 );
-                CREATE INDEX idx_name ON models(name);
+                CREATE INDEX idx_author ON models(author);
+                CREATE INDEX idx_type ON models(type);
+                CREATE INDEX idx_model_series ON models(model_series);
                 CREATE INDEX idx_provider ON models(provider);
+                CREATE INDEX idx_license ON models(license);
                 CREATE INDEX idx_created_at ON models(created_at);",
             ),
             // Future migrations go here
@@ -92,25 +95,23 @@ impl ModelStorage for SqliteStorage {
     fn register_model(&self, model: ModelInfo) -> Result<(), io::Error> {
         let conn = self.get_connection()?;
 
-        // Check if model exists to preserve created_at
-        let existing_created_at: Option<String> = conn
-            .query_row(
-                "SELECT created_at FROM models WHERE name = ?1",
-                params![&model.name],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let created_at = existing_created_at.unwrap_or_else(|| model.created_at.clone());
-
         let metadata_json = serde_json::to_string(&model.metadata)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO models
+            "INSERT INTO models
              (uuid, name, author, type, model_series, provider, license,
               metadata, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(name) DO UPDATE SET
+                uuid = excluded.uuid,
+                author = excluded.author,
+                type = excluded.type,
+                model_series = excluded.model_series,
+                provider = excluded.provider,
+                license = excluded.license,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at",
             params![
                 &model.uuid,
                 &model.name,
@@ -120,7 +121,7 @@ impl ModelStorage for SqliteStorage {
                 &model.provider,
                 model.license.as_deref(),
                 &metadata_json,
-                &created_at,
+                &model.created_at,
                 &model.updated_at,
             ],
         )
