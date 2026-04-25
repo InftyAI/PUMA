@@ -23,11 +23,27 @@
 
 ## Installation
 
+### Install with Cargo
+
 ```bash
-make build
+cargo install puma
 ```
 
-The binary will be available as `./puma`.
+### Build from Source
+
+**Prerequisites:** Rust 1.70+ and Make
+
+```bash
+# Clone the repository
+git clone https://github.com/InftyAI/PUMA.git
+cd PUMA
+
+# Build the binary
+make build
+
+# The binary will be available at ./puma
+./puma --version
+```
 
 ## Quick Start
 
