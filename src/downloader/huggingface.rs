@@ -6,7 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ModelInfo, ModelRegistry, ModelSpec};
+use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
 use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
@@ -43,7 +43,7 @@ impl HuggingFaceDownloader {
         Option<String>,
         Option<String>,
         Option<String>,
-        Option<u64>,
+        Option<serde_json::Value>,
         Option<u64>,
     ) {
         let url = format!("https://huggingface.co/api/models/{}", model_name);
@@ -74,14 +74,11 @@ impl HuggingFaceDownloader {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
 
-                    let parameters = json
-                        .get("safetensors")
-                        .and_then(|st| st.get("total"))
-                        .and_then(|v| v.as_u64());
+                    let safetensors = json.get("safetensors").cloned();
 
                     let storage = json.get("usedStorage").and_then(|v| v.as_u64());
 
-                    (author, task, license, model_type, parameters, storage)
+                    (author, task, license, model_type, safetensors, storage)
                 } else {
                     (None, None, None, None, None, None)
                 }
@@ -258,8 +255,8 @@ impl Downloader for HuggingFaceDownloader {
                 author_from_api,
                 task_from_api,
                 license_from_api,
-                model_type_from_api,
-                parameters_from_api,
+                model_series_from_api,
+                safetensors_from_api,
                 storage_from_api,
             ) = Self::fetch_metadata_from_api(name).await;
 
@@ -283,29 +280,34 @@ impl Downloader for HuggingFaceDownloader {
                 None
             };
 
-            let spec = Some(ModelSpec {
-                author: author_from_api,
-                task: task_from_api,
-                license: license_from_api,
-                model_type: model_type_from_api,
-                parameters: parameters_from_api,
-                context_window,
-            });
-
             // Use storage from API, fallback to accumulated download size
             let model_size =
                 storage_from_api.unwrap_or_else(|| progress_manager.total_downloaded_bytes());
 
+            let artifact = ArtifactInfo {
+                revision: sha.clone(),
+                size: model_size,
+                path: model_cache_path.to_string_lossy().to_string(),
+            };
+
+            let metadata = ModelMetadata {
+                artifact,
+                context_window,
+                safetensors: safetensors_from_api,
+            };
+
             let now = chrono::Local::now().to_rfc3339();
             let model_info_record = ModelInfo {
+                uuid: sha, // Use revision SHA as UUID for now
                 name: name.to_string(),
+                author: author_from_api,
+                r#type: task_from_api,
+                model_series: model_series_from_api,
                 provider: "huggingface".to_string(),
-                revision: sha,
-                size: model_size,
+                license: license_from_api,
                 created_at: now.clone(),
                 updated_at: now,
-                cache_path: model_cache_path.to_string_lossy().to_string(),
-                spec,
+                metadata,
             };
 
             let registry = ModelRegistry::new(None);

@@ -3,113 +3,73 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::storage::{ModelStorage, SqliteStorage};
 use crate::utils::file;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ModelSpec {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<u64>,
+pub struct ArtifactInfo {
+    pub revision: String,
+    pub size: u64,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelMetadata {
+    pub artifact: ArtifactInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safetensors: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelInfo {
+    pub uuid: String,
     pub name: String,
+    pub author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>, // Task type (image-text-to-text, text-generation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_series: Option<String>, // Architecture series (qwen3_5, gpt2, llama3)
     pub provider: String,
-    pub revision: String,
-    pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    pub metadata: ModelMetadata,
     pub created_at: String,
     pub updated_at: String,
-    pub cache_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spec: Option<ModelSpec>,
 }
 
 pub struct ModelRegistry {
-    home_dir: PathBuf,
+    storage: Box<dyn ModelStorage>,
 }
 
 impl ModelRegistry {
     pub fn new(home_dir: Option<PathBuf>) -> Self {
-        Self {
-            home_dir: home_dir.unwrap_or_else(file::root_home),
-        }
-    }
+        let home_dir = home_dir.unwrap_or_else(file::root_home);
+        fs::create_dir_all(&home_dir).ok();
 
-    fn registry_file(&self) -> PathBuf {
-        self.home_dir.join("models.json")
+        let db_path = home_dir.join("models.db");
+        let storage = SqliteStorage::new(db_path).expect("Failed to initialize storage");
+
+        Self {
+            storage: Box::new(storage),
+        }
     }
 
     pub fn load_models(&self) -> Result<Vec<ModelInfo>, std::io::Error> {
-        let registry_file = self.registry_file();
-
-        if !registry_file.exists() {
-            return Ok(Vec::new());
-        }
-
-        let contents = fs::read_to_string(registry_file)?;
-        let models: Vec<ModelInfo> = serde_json::from_str(&contents)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        Ok(models)
-    }
-
-    pub fn save_models(&self, models: &[ModelInfo]) -> Result<(), std::io::Error> {
-        // Ensure home directory exists
-        fs::create_dir_all(&self.home_dir)?;
-
-        let registry_file = self.registry_file();
-        let json = serde_json::to_string_pretty(models)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        fs::write(registry_file, json)?;
-        Ok(())
+        self.storage.load_models()
     }
 
     pub fn register_model(&self, model: ModelInfo) -> Result<(), std::io::Error> {
-        let mut models = self.load_models()?;
-
-        // Check if model already exists to preserve created_at
-        let existing_created_at = models
-            .iter()
-            .find(|m| m.name == model.name)
-            .map(|m| m.created_at.clone());
-
-        // Remove existing model with same name if exists
-        models.retain(|m| m.name != model.name);
-
-        // Use existing created_at if this is an update, otherwise use the provided one
-        let mut final_model = model;
-        if let Some(created_at) = existing_created_at {
-            final_model.created_at = created_at;
-        }
-
-        models.push(final_model);
-        self.save_models(&models)?;
-
-        Ok(())
+        self.storage.register_model(model)
     }
 
     pub fn unregister_model(&self, name: &str) -> Result<(), std::io::Error> {
-        let mut models = self.load_models()?;
-        models.retain(|m| m.name != name);
-        self.save_models(&models)?;
-
-        Ok(())
+        self.storage.unregister_model(name)
     }
 
     pub fn get_model(&self, name: &str) -> Result<Option<ModelInfo>, std::io::Error> {
-        let models = self.load_models()?;
-        Ok(models.into_iter().find(|m| m.name == name))
+        self.storage.get_model(name)
     }
 
     pub fn remove_model(&self, name: &str) -> Result<(), std::io::Error> {
@@ -117,10 +77,10 @@ impl ModelRegistry {
         let model_info = self.get_model(name)?;
 
         if let Some(info) = model_info {
-            // Delete cache directory if it exists
-            let cache_path = std::path::Path::new(&info.cache_path);
-            if cache_path.exists() {
-                fs::remove_dir_all(cache_path)?;
+            // Delete artifact directory if it exists
+            let artifact_path = std::path::Path::new(&info.metadata.artifact.path);
+            if artifact_path.exists() {
+                fs::remove_dir_all(artifact_path)?;
             }
 
             // Remove from registry
@@ -143,21 +103,43 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // Helper to create a test model
+    fn create_test_model(name: &str, revision: &str) -> ModelInfo {
+        let safetensors = serde_json::json!({
+            "parameters": {
+                "F32": 7000000000u64
+            },
+            "total": 7000000000u64
+        });
+
+        ModelInfo {
+            uuid: revision.to_string(),
+            name: name.to_string(),
+            author: Some("test-author".to_string()),
+            r#type: Some("text-generation".to_string()),
+            model_series: Some("gpt2".to_string()),
+            provider: "huggingface".to_string(),
+            license: Some("mit".to_string()),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            metadata: ModelMetadata {
+                artifact: ArtifactInfo {
+                    revision: revision.to_string(),
+                    size: 1000,
+                    path: "/tmp/test".to_string(),
+                },
+                context_window: Some(2048),
+                safetensors: Some(safetensors),
+            },
+        }
+    }
+
     #[test]
     fn test_add_and_load_model() {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
+        let model = create_test_model("test/model", "abc123");
 
         registry.register_model(model.clone()).unwrap();
 
@@ -171,16 +153,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
+        let model = create_test_model("test/model", "abc123");
 
         registry.register_model(model).unwrap();
         assert_eq!(registry.load_models().unwrap().len(), 1);
@@ -194,16 +167,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
+        let model = create_test_model("test/model", "abc123");
 
         registry.register_model(model).unwrap();
 
@@ -230,36 +194,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model1 = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
-
+        let model1 = create_test_model("test/model", "abc123");
         registry.register_model(model1).unwrap();
 
-        let model2 = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "def456".to_string(),
-            size: 2000,
-            created_at: "2025-01-02T00:00:00Z".to_string(),
-            updated_at: "2025-01-02T00:00:00Z".to_string(),
-            cache_path: "/tmp/test2".to_string(),
-            spec: None,
-        };
+        let mut model2 = create_test_model("test/model", "def456");
+        model2.metadata.artifact.size = 2000;
+        model2.metadata.artifact.path = "/tmp/test2".to_string();
+        model2.created_at = "2025-01-02T00:00:00Z".to_string();
+        model2.updated_at = "2025-01-02T00:00:00Z".to_string();
 
         registry.register_model(model2).unwrap();
 
         let models = registry.load_models().unwrap();
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].revision, "def456");
-        assert_eq!(models[0].size, 2000);
+        assert_eq!(models[0].metadata.artifact.revision, "def456");
+        assert_eq!(models[0].metadata.artifact.size, 2000);
         // created_at should be preserved from model1
         assert_eq!(models[0].created_at, "2025-01-01T00:00:00Z");
         // updated_at should be from model2
@@ -276,16 +225,8 @@ mod tests {
         fs::create_dir_all(&cache_dir).unwrap();
         fs::write(cache_dir.join("test.txt"), "test data").unwrap();
 
-        let model = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: cache_dir.to_string_lossy().to_string(),
-            spec: None,
-        };
+        let mut model = create_test_model("test/model", "abc123");
+        model.metadata.artifact.path = cache_dir.to_string_lossy().to_string();
 
         registry.register_model(model).unwrap();
         assert_eq!(registry.load_models().unwrap().len(), 1);
@@ -316,23 +257,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/gpt-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123def456".to_string(),
-            size: 7_000_000_000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test/gpt".to_string(),
-            spec: Some(ModelSpec {
-                model_type: Some("gpt2".to_string()),
-                parameters: Some(7_000_000_000),
-                context_window: Some(2048),
-                author: None,
-                task: None,
-                license: None,
-            }),
-        };
+        let model = create_test_model("test/gpt-model", "abc123def456");
 
         registry.register_model(model).unwrap();
 
@@ -342,13 +267,21 @@ mod tests {
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/gpt-model");
         assert_eq!(model_info.provider, "huggingface");
-        assert_eq!(model_info.revision, "abc123def456");
-        assert_eq!(model_info.size, 7_000_000_000);
-
-        let spec = model_info.spec.as_ref().unwrap();
-        assert_eq!(spec.model_type, Some("gpt2".to_string()));
-        assert_eq!(spec.context_window, Some(2048));
-        assert_eq!(spec.parameters, Some(7_000_000_000));
+        assert_eq!(model_info.metadata.artifact.revision, "abc123def456");
+        assert_eq!(model_info.model_series, Some("gpt2".to_string()));
+        assert_eq!(model_info.metadata.context_window, Some(2048));
+        assert_eq!(
+            model_info
+                .metadata
+                .safetensors
+                .as_ref()
+                .unwrap()
+                .get("total")
+                .unwrap()
+                .as_u64()
+                .unwrap(),
+            7_000_000_000
+        );
     }
 
     #[test]
@@ -356,16 +289,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/legacy-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "legacy123".to_string(),
-            size: 1_000_000,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            updated_at: "2024-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test/legacy".to_string(),
-            spec: None,
-        };
+        let mut model = create_test_model("test/legacy-model", "legacy123");
+        model.metadata.safetensors = None;
+        model.metadata.context_window = None;
 
         registry.register_model(model).unwrap();
 
@@ -374,6 +300,7 @@ mod tests {
 
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/legacy-model");
-        assert!(model_info.spec.is_none());
+        assert!(model_info.metadata.safetensors.is_none());
+        assert!(model_info.metadata.context_window.is_none());
     }
 }
