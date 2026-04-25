@@ -1,17 +1,14 @@
 # PUMA
 
-A lightweight, high-performance inference engine for local AI. *Play for fun.*
+A lightweight, high-performance inference engine for local AI.
 
 ## Features
 
-- **Model Management** - Download and manage AI models from model providers like Hugging Face
-- **System Detection** - Automatic GPU detection and system information reporting
-- **Local Caching** - Efficient model storage with custom cache directories
-- **Multiple Providers** - Support for Hugging Face with ModelScope coming soon
+- **Model Management** - Download, cache, and organize AI models from Hugging Face
+- **Advanced Filtering** - Search models with regex patterns and SQL-style queries
+- **System Detection** - Automatic GPU detection and resource reporting
 
 ## Installation
-
-### From Source
 
 ```bash
 make build
@@ -21,76 +18,109 @@ The binary will be available as `./puma`.
 
 ## Quick Start
 
-### 1. Download a Model
-
 ```bash
-# From Hugging Face (default)
-puma pull InftyAI/tiny-random-gpt2
-```
+# Download a model
+puma pull inftyai/tiny-random-gpt2
 
-### 2. List Downloaded Models
-
-```bash
+# List all models
 puma ls
-```
 
-### 3. Check System Information
+# Inspect model details
+puma inspect inftyai/tiny-random-gpt2
 
-```bash
+# Check system info
 puma info
-```
 
-Example output:
-```
-System Information:
-  Operating System:   Darwin
-  Architecture:       arm64
-  CPU Cores:          14
-  Total Memory:       36.00 GiB
-  GPU:                Apple M4 Max (Metal) - 32 GPU cores
-
-PUMA Information:
-  PUMA Version:       0.0.1
-  Cache Directory:    ~/.puma/cache
-  Cache Size:         799.88 MiB
-  Models:             1
-  Running Models:     0
+# Remove a model
+puma rm inftyai/tiny-random-gpt2
 ```
 
 ## Commands
 
-| Command | Status | Description | Example |
-|---------|--------|-------------|---------|
-| `pull` | ✅ | Download a model from a provider | `puma pull InftyAI/tiny-random-gpt2` |
-| `ls` | ✅ | List local models | `puma ls` |
-| `ps` | 🚧 | List running models | `puma ps` |
-| `run` | 🚧 | Create and run a model | `puma run InftyAI/tiny-random-gpt2` |
-| `stop` | 🚧 | Stop a running model | `puma stop <model-id>` |
-| `rm` | ✅ | Remove a model | `puma rm InftyAI/tiny-random-gpt2` |
-| `info` | ✅ | Display system-wide information | `puma info` |
-| `inspect` | ✅ | Return detailed information about a model or service | `puma inspect InftyAI/tiny-random-gpt2` |
-| `version` | ✅ | Show PUMA version | `puma version` |
-| `help` | ✅ | Show help information | `puma help` |
+| Command | Status | Description |
+|---------|--------|-------------|
+| `pull <model>` | ✅ | Download model from provider |
+| `ls [pattern]` | ✅ | List models (supports regex) |
+| `ls -l <filters>` | ✅ | List with SQL filters (author, task, license, provider) |
+| `inspect <model>` | ✅ | Show detailed model information |
+| `rm <model>` | ✅ | Remove model and cache |
+| `info` | ✅ | Display system information |
+| `version` | ✅ | Show PUMA version |
+| `ps` | 🚧 | List running models |
+| `run` | 🚧 | Start model inference |
+| `stop` | 🚧 | Stop running model |
 
-## Configuration
+## Advanced Usage
 
-PUMA stores models in `~/.puma/cache` by default. This location is used for all downloaded models and metadata.
+### Pattern Matching
 
-## Supported Providers
+```bash
+# Substring match
+puma ls qwen
 
-- **Hugging Face** - Full support with custom cache directories
+# Prefix match
+puma ls "^inftyai/"
+
+# Alternation
+puma ls "llama-(2|3)"
+```
+
+### Label Filtering
+
+```bash
+# Single filter
+puma ls -l author=inftyai
+
+# Multiple filters (AND condition)
+puma ls -l author=inftyai,license=mit
+
+# Combine pattern + filter
+puma ls llama -l author=meta
+```
+
+**Available filters:** `author`, `task`, `license`, `provider`, `model_series`
+
+### Inspect Output
+
+```bash
+$ puma inspect inftyai/tiny-random-gpt2
+
+name: inftyai/tiny-random-gpt2
+kind: model
+spec:
+  author:         inftyai
+  task:           text-generation
+  license:        MIT
+  model_series:   gpt2
+  context_window: 2.05K
+  safetensors:
+    total:        7.00B
+    parameters:
+      f32:        7.00B
+  artifact:
+    provider:     huggingface
+    revision:     abc123de
+    size:         1.24 GB
+    cache_path:   ~/.puma/cache/...
+status:
+  created:      2 hours ago
+  updated:      2 hours ago
+```
+
+## Storage
+
+- **Database:** `~/.puma/models.db` (SQLite)
+- **Cache:** `~/.puma/cache/` (model files)
+
+Models are stored with lowercase names for case-insensitive matching.
 
 ## Development
 
-### Build
-
 ```bash
+# Build
 make build
-```
 
-### Test
-
-```bash
+# Run tests (67 unit + 22 integration)
 make test
 ```
 
@@ -99,19 +129,21 @@ make test
 ```
 puma/
 ├── src/
-│   ├── cli/         # Command-line interface
-│   ├── downloader/  # Model download logic
-│   ├── registry/    # Model registry management
-│   ├── system/      # System detection (CPU, GPU, memory)
-│   └── utils/       # Utility functions
-├── Cargo.toml       # Rust dependencies
-└── Makefile         # Build commands
+│   ├── cli/          # Command implementations (ls, rm, inspect)
+│   ├── downloader/   # HuggingFace download logic
+│   ├── registry/     # Model registry & metadata
+│   ├── storage/      # SQLite storage backend
+│   ├── system/       # System info detection
+│   └── utils/        # Formatting & helpers
+├── tests/            # Integration tests
+├── Cargo.toml        # Rust dependencies
+└── Makefile          # Build commands
 ```
 
 ## License
 
 Apache-2.0
 
-## Contributing
+## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=inftyai/puma&type=Date)](https://www.star-history.com/#inftyai/puma&Date)
