@@ -156,7 +156,8 @@ pub async fn run(cli: Cli) {
         Commands::PULL(args) => match args.provider {
             Provider::Huggingface => {
                 let downloader = HuggingFaceDownloader::new();
-                if let Err(e) = downloader.download_model(&args.model).await {
+                // Make sure to use lowercase for model name to ensure consistent caching and registry entries.
+                if let Err(e) = downloader.download_model(&args.model.to_lowercase()).await {
                     eprintln!("❌ Error downloading model: {}", e);
                     std::process::exit(1);
                 }
