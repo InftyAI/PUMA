@@ -57,7 +57,10 @@ impl ModelRegistry {
         }
     }
 
-    pub fn load_models(&self, filters: Option<&HashMap<String, String>>) -> Result<Vec<ModelInfo>, std::io::Error> {
+    pub fn load_models(
+        &self,
+        filters: Option<&HashMap<String, String>>,
+    ) -> Result<Vec<ModelInfo>, std::io::Error> {
         self.storage.load_models(filters)
     }
 
