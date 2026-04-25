@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.svg">
-  <img alt="PUMA Logo" src="docs/images/puma-logo-light.svg" width="240">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo-light.svg">
+  <img alt="PUMA Logo" src="https://github.com/InftyAI/PUMA" width="240">
 </picture>
 
 **A lightweight, high-performance inference engine for local AI**
@@ -31,8 +31,6 @@ cargo install puma
 
 ### Build from Source
 
-**Prerequisites:** Rust 1.70+ and Make
-
 ```bash
 # Clone the repository
 git clone https://github.com/InftyAI/PUMA.git
@@ -42,7 +40,7 @@ cd PUMA
 make build
 
 # The binary will be available at ./puma
-./puma --version
+./puma version
 ```
 
 ## Quick Start
@@ -114,7 +112,7 @@ puma ls llama -l author=meta
 $ puma inspect inftyai/tiny-random-gpt2
 
 name: inftyai/tiny-random-gpt2
-kind: model
+kind: Model
 spec:
   author:         inftyai
   task:           text-generation
