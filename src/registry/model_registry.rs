@@ -29,7 +29,7 @@ pub struct ModelInfo {
     pub name: String,
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>, // Task type (image-text-to-text, text-generation)
+    pub task: Option<String>, // Task type (image-text-to-text, text-generation)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_series: Option<String>, // Architecture series (qwen3_5, gpt2, llama3)
     pub provider: String,
@@ -117,7 +117,7 @@ mod tests {
             uuid: revision.to_string(),
             name: name.to_string(),
             author: Some("test-author".to_string()),
-            r#type: Some("text-generation".to_string()),
+            task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
             provider: "huggingface".to_string(),
             license: Some("mit".to_string()),

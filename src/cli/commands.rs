@@ -108,13 +108,14 @@ pub async fn run(cli: Cli) {
         Commands::LS(args) => {
             let registry = ModelRegistry::new(None);
 
-            let models = match ls::execute(&registry, args.pattern.as_deref(), args.query.as_deref()) {
-                Ok(models) => models,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
-            };
+            let models =
+                match ls::execute(&registry, args.pattern.as_deref(), args.query.as_deref()) {
+                    Ok(models) => models,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        std::process::exit(1);
+                    }
+                };
 
             let mut table = Table::new();
             table.set_format(
@@ -123,7 +124,9 @@ pub async fn run(cli: Cli) {
                     .padding(0, 1)
                     .build(),
             );
-            table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "AGE"]);
+            table.add_row(row![
+                "MODEL", "TASK", "PROVIDER", "REVISION", "SIZE", "CREATED"
+            ]);
             for model in models {
                 let size_str = format_size_decimal(model.metadata.artifact.size);
 
@@ -135,8 +138,11 @@ pub async fn run(cli: Cli) {
 
                 let created_str = format_time_ago(&model.created_at);
 
+                let model_task = model.task.as_deref().unwrap_or("N/A");
+
                 table.add_row(row![
                     model.name,
+                    model_task,
                     model.provider,
                     revision_short,
                     size_str,
@@ -219,7 +225,7 @@ mod tests {
             uuid: revision.to_string(),
             name: name.to_string(),
             author: Some("test-author".to_string()),
-            r#type: Some("text-generation".to_string()),
+            task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
             provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
@@ -268,7 +274,7 @@ mod tests {
 
         let mut model = create_test_model("test/gpt-model", "abc123def456");
         model.author = Some("test-org".to_string());
-        model.r#type = Some("text-generation".to_string());
+        model.task = Some("text-generation".to_string());
         model.license = Some("mit".to_string());
         model.updated_at = "2025-01-02T00:00:00Z".to_string();
 
@@ -282,7 +288,7 @@ mod tests {
         assert_eq!(model_info.created_at, "2025-01-01T00:00:00Z");
         assert_eq!(model_info.updated_at, "2025-01-02T00:00:00Z");
         assert_eq!(model_info.author, Some("test-org".to_string()));
-        assert_eq!(model_info.r#type, Some("text-generation".to_string()));
+        assert_eq!(model_info.task, Some("text-generation".to_string()));
         assert_eq!(model_info.license, Some("mit".to_string()));
         assert_eq!(model_info.model_series, Some("gpt2".to_string()));
         assert_eq!(model_info.metadata.context_window, Some(2048));
@@ -363,5 +369,4 @@ mod tests {
         assert_eq!(result.metadata.artifact.revision, "v2");
         assert_eq!(result.metadata.artifact.size, 2000);
     }
-
 }

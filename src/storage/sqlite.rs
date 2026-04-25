@@ -26,7 +26,7 @@ impl SqliteStorage {
                     uuid TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
                     author TEXT,
-                    type TEXT,
+                    task TEXT,
                     model_series TEXT,
                     provider TEXT NOT NULL,
                     license TEXT,
@@ -36,7 +36,7 @@ impl SqliteStorage {
                     CHECK(json_valid(metadata))
                 );
                 CREATE INDEX idx_author ON models(author);
-                CREATE INDEX idx_type ON models(type);
+                CREATE INDEX idx_task ON models(task);
                 CREATE INDEX idx_model_series ON models(model_series);
                 CREATE INDEX idx_provider ON models(provider);
                 CREATE INDEX idx_license ON models(license);
@@ -68,7 +68,7 @@ impl ModelStorage for SqliteStorage {
 
         if let Some(filter_map) = filters {
             // Allowed columns for filtering (prevent SQL injection)
-            let allowed_columns = ["author", "type", "model_series", "provider", "license"];
+            let allowed_columns = ["author", "task", "model_series", "provider", "license"];
 
             for (key, value) in filter_map {
                 if allowed_columns.contains(&key.as_str()) {
@@ -84,13 +84,13 @@ impl ModelStorage for SqliteStorage {
         }
 
         let query = if where_clauses.is_empty() {
-            "SELECT uuid, name, author, type, model_series, provider, license,
+            "SELECT uuid, name, author, task, model_series, provider, license,
                     metadata, created_at, updated_at
              FROM models"
                 .to_string()
         } else {
             format!(
-                "SELECT uuid, name, author, type, model_series, provider, license,
+                "SELECT uuid, name, author, task, model_series, provider, license,
                         metadata, created_at, updated_at
                  FROM models
                  WHERE {}",
@@ -113,7 +113,7 @@ impl ModelStorage for SqliteStorage {
                     uuid: row.get(0)?,
                     name: row.get(1)?,
                     author: row.get(2)?,
-                    r#type: row.get(3)?,
+                    task: row.get(3)?,
                     model_series: row.get(4)?,
                     provider: row.get(5)?,
                     license: row.get(6)?,
@@ -141,13 +141,13 @@ impl ModelStorage for SqliteStorage {
 
         conn.execute(
             "INSERT INTO models
-             (uuid, name, author, type, model_series, provider, license,
+             (uuid, name, author, task, model_series, provider, license,
               metadata, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(name) DO UPDATE SET
                 uuid = excluded.uuid,
                 author = excluded.author,
-                type = excluded.type,
+                task = excluded.task,
                 model_series = excluded.model_series,
                 provider = excluded.provider,
                 license = excluded.license,
@@ -157,7 +157,7 @@ impl ModelStorage for SqliteStorage {
                 &model.uuid,
                 &name_lower,
                 author_lower.as_deref(),
-                model.r#type.as_deref(),
+                model.task.as_deref(),
                 model.model_series.as_deref(),
                 &model.provider,
                 model.license.as_deref(),
@@ -190,7 +190,7 @@ impl ModelStorage for SqliteStorage {
         let name_lower = name.to_lowercase();
 
         let result = conn.query_row(
-            "SELECT uuid, name, author, type, model_series, provider, license,
+            "SELECT uuid, name, author, task, model_series, provider, license,
                     metadata, created_at, updated_at
              FROM models WHERE name = ?1",
             params![name_lower],
@@ -203,7 +203,7 @@ impl ModelStorage for SqliteStorage {
                     uuid: row.get(0)?,
                     name: row.get(1)?,
                     author: row.get(2)?,
-                    r#type: row.get(3)?,
+                    task: row.get(3)?,
                     model_series: row.get(4)?,
                     provider: row.get(5)?,
                     license: row.get(6)?,
@@ -238,7 +238,7 @@ mod tests {
             uuid: uuid.to_string(),
             name: name.to_string(),
             author: Some("test-author".to_string()),
-            r#type: Some("text-generation".to_string()),
+            task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
             provider: "huggingface".to_string(),
             license: Some("mit".to_string()),

@@ -20,8 +20,8 @@ pub fn display(model: &ModelInfo) {
         model.author.as_deref().unwrap_or("N/A")
     );
     println!(
-        "  Type:           {}",
-        model.r#type.as_deref().unwrap_or("N/A")
+        "  Task:           {}",
+        model.task.as_deref().unwrap_or("N/A")
     );
     println!(
         "  License:        {}",
@@ -95,7 +95,7 @@ mod tests {
             uuid: uuid.to_string(),
             name: name.to_string(),
             author: Some("test-author".to_string()),
-            r#type: Some("text-generation".to_string()),
+            task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
             provider: "huggingface".to_string(),
             license: Some("mit".to_string()),

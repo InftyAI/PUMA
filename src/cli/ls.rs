@@ -65,7 +65,7 @@ mod tests {
             uuid: uuid.to_string(),
             name: name.to_string(),
             author: Some(author.to_string()),
-            r#type: Some("text-generation".to_string()),
+            task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
             provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
