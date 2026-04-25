@@ -1,12 +1,25 @@
-# PUMA
+<div align="center">
 
-A lightweight, high-performance inference engine for local AI.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.png">
+  <img alt="PUMA Logo" src="docs/images/puma-logo-light.svg" width="240">
+</picture>
 
-## Features
+**A lightweight, high-performance inference engine for local AI**
 
-- **Model Management** - Download, cache, and organize AI models from Hugging Face
-- **Advanced Filtering** - Search models with regex patterns and SQL-style queries
-- **System Detection** - Automatic GPU detection and resource reporting
+[![Stability: Active](https://img.shields.io/badge/stability-active-brightgreen.svg)](https://github.com/InftyAI/PUMA)
+[![Latest Release](https://img.shields.io/github/v/release/InftyAI/PUMA)](https://github.com/InftyAI/PUMA/releases)
+
+</div>
+
+## ✨ Features
+
+🔧 **Model Management** - Download, cache, and organize AI models from Hugging Face
+
+🔍 **Advanced Filtering** - Search models with regex patterns and SQL-style queries
+
+💻 **System Detection** - Automatic GPU detection and resource reporting
 
 ## Installation
 
@@ -40,8 +53,7 @@ puma rm inftyai/tiny-random-gpt2
 | Command | Status | Description |
 |---------|--------|-------------|
 | `pull <model>` | ✅ | Download model from provider |
-| `ls [pattern]` | ✅ | List models (supports regex) |
-| `ls -l <filters>` | ✅ | List with SQL filters (author, task, license, provider) |
+| `ls` | ✅ | List models (supports regex, label filters) |
 | `inspect <model>` | ✅ | Show detailed model information |
 | `rm <model>` | ✅ | Remove model and cache |
 | `info` | ✅ | Display system information |
@@ -107,7 +119,7 @@ status:
   updated:      2 hours ago
 ```
 
-## Storage
+## Model Management
 
 - **Database:** `~/.puma/models.db` (SQLite)
 - **Cache:** `~/.puma/cache/` (model files)
