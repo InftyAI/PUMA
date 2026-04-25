@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.svg">
   <img alt="PUMA Logo" src="docs/images/puma-logo-light.svg" width="240">
 </picture>
 
