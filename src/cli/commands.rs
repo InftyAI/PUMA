@@ -21,7 +21,7 @@ enum Commands {
     /// List running models
     PS,
     /// List local models
-    LS,
+    LS(LsArgs),
     /// Download a model from a model provider
     PULL(PullArgs),
     /// Create and run a new model
@@ -39,8 +39,18 @@ enum Commands {
 }
 
 #[derive(Parser)]
+struct LsArgs {
+    /// Optional model name pattern to filter (e.g., qwen, openai/*)
+    pattern: Option<String>,
+
+    /// Advanced filter using SQL WHERE conditions (e.g., author=inftyai,license=mit)
+    #[arg(short = 'l', long, value_name = "KEY=VALUE,...")]
+    query: Option<String>,
+}
+
+#[derive(Parser)]
 struct PullArgs {
-    /// Model name to download (e.g., InftyAI/tiny-random-gpt2)
+    /// Model name to download (e.g., inftyai/tiny-random-gpt2)
     model: String,
     #[arg(
         short = 'p',
@@ -54,13 +64,13 @@ struct PullArgs {
 
 #[derive(Parser)]
 struct RmArgs {
-    /// Model name to remove (e.g., InftyAI/tiny-random-gpt2)
+    /// Model name to remove (e.g., inftyai/tiny-random-gpt2)
     model: String,
 }
 
 #[derive(Parser)]
 struct InspectArgs {
-    /// Model name to inspect (e.g., InftyAI/tiny-random-gpt2)
+    /// Model name to inspect (e.g., inftyai/tiny-random-gpt2)
     model: String,
 }
 
@@ -94,9 +104,55 @@ pub async fn run(cli: Cli) {
             table.printstd();
         }
 
-        Commands::LS => {
+        Commands::LS(args) => {
             let registry = ModelRegistry::new(None);
-            let models = registry.load_models().unwrap_or_default();
+
+            // Parse query filters if provided (e.g., "author=inftyai,license=mit")
+            let mut query_filters = std::collections::HashMap::new();
+            if let Some(query_str) = &args.query {
+                for pair in query_str.split(',') {
+                    if let Some((key, value)) = pair.split_once('=') {
+                        query_filters.insert(key.trim().to_string(), value.trim().to_string());
+                    } else {
+                        eprintln!("Invalid query format: {}. Expected key=value pairs separated by commas.", pair);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            // Load models with optional SQL filters
+            let filter_ref = if query_filters.is_empty() {
+                None
+            } else {
+                Some(&query_filters)
+            };
+
+            let mut models = registry.load_models(filter_ref).unwrap_or_else(|e| {
+                eprintln!("Failed to query models: {}", e);
+                std::process::exit(1);
+            });
+
+            // Filter models by name pattern if provided (case-insensitive)
+            if let Some(pattern) = &args.pattern {
+                let pattern_lower = pattern.to_lowercase();
+                models.retain(|model| {
+                    let name_lower = model.name.to_lowercase();
+                    if pattern_lower.ends_with("/*") {
+                        // Prefix match: "InftyAI/*" matches "InftyAI/model1", "InftyAI/model2"
+                        let prefix = &pattern_lower[..pattern_lower.len() - 2];
+                        name_lower.starts_with(prefix)
+                    } else if pattern_lower.contains('*') {
+                        // Wildcard match (simple glob)
+                        let regex_pattern = pattern_lower.replace('*', ".*");
+                        regex::Regex::new(&regex_pattern)
+                            .map(|re| re.is_match(&name_lower))
+                            .unwrap_or(false)
+                    } else {
+                        // Exact or substring match
+                        name_lower.contains(&pattern_lower)
+                    }
+                });
+            }
 
             let mut table = Table::new();
             table.set_format(
@@ -309,7 +365,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let models = registry.load_models().unwrap_or_default();
+        let models = registry.load_models(None).unwrap_or_default();
         assert_eq!(models.len(), 0);
     }
 
@@ -322,7 +378,7 @@ mod tests {
 
         registry.register_model(model).unwrap();
 
-        let models = registry.load_models().unwrap();
+        let models = registry.load_models(None).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "test/model");
         assert_eq!(models[0].provider, "huggingface");

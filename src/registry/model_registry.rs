@@ -1,5 +1,6 @@
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -56,8 +57,8 @@ impl ModelRegistry {
         }
     }
 
-    pub fn load_models(&self) -> Result<Vec<ModelInfo>, std::io::Error> {
-        self.storage.load_models()
+    pub fn load_models(&self, filters: Option<&HashMap<String, String>>) -> Result<Vec<ModelInfo>, std::io::Error> {
+        self.storage.load_models(filters)
     }
 
     pub fn register_model(&self, model: ModelInfo) -> Result<(), std::io::Error> {
@@ -143,7 +144,7 @@ mod tests {
 
         registry.register_model(model.clone()).unwrap();
 
-        let models = registry.load_models().unwrap();
+        let models = registry.load_models(None).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "test/model");
     }
@@ -156,10 +157,10 @@ mod tests {
         let model = create_test_model("test/model", "abc123");
 
         registry.register_model(model).unwrap();
-        assert_eq!(registry.load_models().unwrap().len(), 1);
+        assert_eq!(registry.load_models(None).unwrap().len(), 1);
 
         registry.unregister_model("test/model").unwrap();
-        assert_eq!(registry.load_models().unwrap().len(), 0);
+        assert_eq!(registry.load_models(None).unwrap().len(), 0);
     }
 
     #[test]
@@ -205,7 +206,7 @@ mod tests {
 
         registry.register_model(model2).unwrap();
 
-        let models = registry.load_models().unwrap();
+        let models = registry.load_models(None).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].metadata.artifact.revision, "def456");
         assert_eq!(models[0].metadata.artifact.size, 2000);
@@ -229,14 +230,14 @@ mod tests {
         model.metadata.artifact.path = cache_dir.to_string_lossy().to_string();
 
         registry.register_model(model).unwrap();
-        assert_eq!(registry.load_models().unwrap().len(), 1);
+        assert_eq!(registry.load_models(None).unwrap().len(), 1);
         assert!(cache_dir.exists());
 
         // Delete model
         registry.remove_model("test/model").unwrap();
 
         // Verify model removed from registry
-        assert_eq!(registry.load_models().unwrap().len(), 0);
+        assert_eq!(registry.load_models(None).unwrap().len(), 0);
 
         // Verify cache directory deleted
         assert!(!cache_dir.exists());
