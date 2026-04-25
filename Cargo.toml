@@ -1,6 +1,6 @@
 [package]
 name = "puma"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "A lightweight, high-performance inference engine for local AI."
 license = "Apache-2.0"
