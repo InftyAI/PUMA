@@ -39,8 +39,8 @@ fn test_pull_command_with_provider() {
     let output = run_puma(home, &["inspect", "inftyai/tiny-random-gpt2"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Name: inftyai/tiny-random-gpt2"));
-    assert!(stdout.contains("Provider"));
+    assert!(stdout.contains("name: inftyai/tiny-random-gpt2"));
+    assert!(stdout.contains("provider"));
     assert!(stdout.contains("huggingface"));
 
     // Verify model can be removed

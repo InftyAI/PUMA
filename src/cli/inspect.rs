@@ -12,19 +12,19 @@ pub fn execute(registry: &ModelRegistry, model_name: &str) -> Result<ModelInfo, 
 
 /// Display the model information
 pub fn display(model: &ModelInfo) {
-    println!("Name: {}", model.name);
-    println!("Kind: Model");
-    println!("Spec:");
+    println!("name: {}", model.name);
+    println!("kind: Model");
+    println!("spec:");
     println!(
-        "  Author:         {}",
+        "  author:         {}",
         model.author.as_deref().unwrap_or("N/A")
     );
     println!(
-        "  Task:           {}",
+        "  task:           {}",
         model.task.as_deref().unwrap_or("N/A")
     );
     println!(
-        "  License:        {}",
+        "  license:        {}",
         model
             .license
             .as_ref()
@@ -32,11 +32,11 @@ pub fn display(model: &ModelInfo) {
             .unwrap_or_else(|| "N/A".to_string())
     );
     println!(
-        "  Model Series:   {}",
+        "  model_series:   {}",
         model.model_series.as_deref().unwrap_or("N/A")
     );
     println!(
-        "  Context Window: {}",
+        "  context_window: {}",
         model
             .metadata
             .context_window
@@ -45,38 +45,38 @@ pub fn display(model: &ModelInfo) {
     );
 
     if let Some(st) = &model.metadata.safetensors {
-        println!("  Safetensors:");
+        println!("  safetensors:");
         if let Some(total) = st.get("total").and_then(|v| v.as_u64()) {
-            println!("    Total:        {}", format_parameters(total));
+            println!("    total:        {}", format_parameters(total));
         }
         if let Some(params) = st.get("parameters").and_then(|v| v.as_object()) {
-            println!("    Parameters:");
+            println!("    parameters:");
             for (dtype, count) in params {
                 if let Some(num) = count.as_u64() {
                     println!(
                         "      {:<12} {}",
-                        format!("{}:", dtype),
+                        format!("{}:", dtype.to_lowercase()),
                         format_parameters(num)
                     );
                 }
             }
         }
     } else {
-        println!("  Safetensors:    N/A");
+        println!("  safetensors:    N/A");
     }
 
     // Artifact section
-    println!("  Artifact:");
-    println!("    Provider:       {}", model.provider);
-    println!("    Revision:       {}", model.metadata.artifact.revision);
+    println!("  artifact:");
+    println!("    provider:       {}", model.provider);
+    println!("    revision:       {}", model.metadata.artifact.revision);
     println!(
-        "    Size:           {}",
+        "    size:           {}",
         format_size_decimal(model.metadata.artifact.size)
     );
-    println!("    Cache Path:     {}", model.metadata.artifact.path);
-    println!("Status:");
-    println!("  Created:        {}", format_time_ago(&model.created_at));
-    println!("  Updated:        {}", format_time_ago(&model.updated_at));
+    println!("    cache_path:     {}", model.metadata.artifact.path);
+    println!("status:");
+    println!("  created:        {}", format_time_ago(&model.created_at));
+    println!("  updated:        {}", format_time_ago(&model.updated_at));
 }
 
 #[cfg(test)]
