@@ -132,26 +132,19 @@ pub async fn run(cli: Cli) {
                 std::process::exit(1);
             });
 
-            // Filter models by name pattern if provided (case-insensitive)
+            // Filter models by name pattern if provided (supports regex)
+            // Note: model names are already stored in lowercase in the database
             if let Some(pattern) = &args.pattern {
                 let pattern_lower = pattern.to_lowercase();
-                models.retain(|model| {
-                    let name_lower = model.name.to_lowercase();
-                    if pattern_lower.ends_with("/*") {
-                        // Prefix match: "InftyAI/*" matches "InftyAI/model1", "InftyAI/model2"
-                        let prefix = &pattern_lower[..pattern_lower.len() - 2];
-                        name_lower.starts_with(prefix)
-                    } else if pattern_lower.contains('*') {
-                        // Wildcard match (simple glob)
-                        let regex_pattern = pattern_lower.replace('*', ".*");
-                        regex::Regex::new(&regex_pattern)
-                            .map(|re| re.is_match(&name_lower))
-                            .unwrap_or(false)
-                    } else {
-                        // Exact or substring match
-                        name_lower.contains(&pattern_lower)
+                match regex::Regex::new(&pattern_lower) {
+                    Ok(re) => {
+                        models.retain(|model| re.is_match(&model.name));
                     }
-                });
+                    Err(e) => {
+                        eprintln!("Invalid regex pattern '{}': {}", pattern, e);
+                        std::process::exit(1);
+                    }
+                }
             }
 
             let mut table = Table::new();
@@ -447,15 +440,25 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = create_test_model("test/remove-model", "abc123");
+        // Create a fake cache directory
+        let cache_dir = temp_dir.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("model.safetensors"), "fake data").unwrap();
+
+        let mut model = create_test_model("test/remove-model", "abc123");
+        model.metadata.artifact.path = cache_dir.to_string_lossy().to_string();
 
         registry.register_model(model).unwrap();
         assert!(registry.get_model("test/remove-model").unwrap().is_some());
+        assert!(cache_dir.exists());
 
-        // Simulate RM command
-        let result = registry.get_model("test/remove-model");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
+        // Simulate RM command - actually remove the model
+        registry.remove_model("test/remove-model").unwrap();
+
+        // Verify model is removed from registry
+        assert!(registry.get_model("test/remove-model").unwrap().is_none());
+        // Verify cache directory is deleted
+        assert!(!cache_dir.exists());
     }
 
     #[test]
@@ -463,9 +466,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let result = registry.get_model("nonexistent/model");
+        // Simulate RM command on non-existent model - should not error
+        let result = registry.remove_model("nonexistent/model");
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -511,5 +514,133 @@ mod tests {
         // Other fields should be updated
         assert_eq!(result.metadata.artifact.revision, "v2");
         assert_eq!(result.metadata.artifact.size, 2000);
+    }
+
+    #[test]
+    fn test_ls_with_pattern_substring() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        registry.register_model(create_test_model("inftyai/model1", "uuid1")).unwrap();
+        registry.register_model(create_test_model("openai/gpt2", "uuid2")).unwrap();
+        registry.register_model(create_test_model("inftyai/model2", "uuid3")).unwrap();
+
+        // Simulate: puma ls inftyai
+        let mut models = registry.load_models(None).unwrap();
+        let pattern = "inftyai".to_lowercase();
+        let re = regex::Regex::new(&pattern).unwrap();
+        models.retain(|model| re.is_match(&model.name));
+
+        assert_eq!(models.len(), 2);
+        assert!(models.iter().all(|m| m.name.contains("inftyai")));
+    }
+
+    #[test]
+    fn test_ls_with_pattern_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        registry.register_model(create_test_model("inftyai/model1", "uuid1")).unwrap();
+        registry.register_model(create_test_model("openai/gpt2", "uuid2")).unwrap();
+        registry.register_model(create_test_model("meta/llama", "uuid3")).unwrap();
+
+        // Simulate: puma ls "^inftyai/"
+        let mut models = registry.load_models(None).unwrap();
+        let pattern = "^inftyai/".to_lowercase();
+        let re = regex::Regex::new(&pattern).unwrap();
+        models.retain(|model| re.is_match(&model.name));
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "inftyai/model1");
+    }
+
+    #[test]
+    fn test_ls_with_pattern_case_insensitive() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        registry.register_model(create_test_model("InftyAI/Model1", "uuid1")).unwrap();
+        registry.register_model(create_test_model("OpenAI/GPT2", "uuid2")).unwrap();
+
+        // Simulate: puma ls InftyAI (user input with mixed case)
+        let mut models = registry.load_models(None).unwrap();
+        let pattern = "InftyAI".to_lowercase();
+        let re = regex::Regex::new(&pattern).unwrap();
+        models.retain(|model| re.is_match(&model.name));
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "inftyai/model1");
+    }
+
+    #[test]
+    fn test_ls_with_pattern_alternation() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        registry.register_model(create_test_model("meta/llama-2", "uuid1")).unwrap();
+        registry.register_model(create_test_model("meta/llama-3", "uuid2")).unwrap();
+        registry.register_model(create_test_model("meta/llama-4", "uuid3")).unwrap();
+
+        // Simulate: puma ls "llama-(2|3)"
+        let mut models = registry.load_models(None).unwrap();
+        let pattern = "llama-(2|3)".to_lowercase();
+        let re = regex::Regex::new(&pattern).unwrap();
+        models.retain(|model| re.is_match(&model.name));
+
+        assert_eq!(models.len(), 2);
+        assert!(models.iter().any(|m| m.name == "meta/llama-2"));
+        assert!(models.iter().any(|m| m.name == "meta/llama-3"));
+    }
+
+    #[test]
+    fn test_ls_with_sql_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let mut model1 = create_test_model("inftyai/model1", "uuid1");
+        model1.author = Some("inftyai".to_string());
+        registry.register_model(model1).unwrap();
+
+        let mut model2 = create_test_model("openai/gpt2", "uuid2");
+        model2.author = Some("openai".to_string());
+        registry.register_model(model2).unwrap();
+
+        // Simulate: puma ls -l author=inftyai
+        let mut filters = std::collections::HashMap::new();
+        filters.insert("author".to_string(), "inftyai".to_string());
+        let models = registry.load_models(Some(&filters)).unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "inftyai/model1");
+    }
+
+    #[test]
+    fn test_ls_with_pattern_and_sql_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let mut model1 = create_test_model("inftyai/llama-2", "uuid1");
+        model1.author = Some("inftyai".to_string());
+        registry.register_model(model1).unwrap();
+
+        let mut model2 = create_test_model("inftyai/gpt2", "uuid2");
+        model2.author = Some("inftyai".to_string());
+        registry.register_model(model2).unwrap();
+
+        let mut model3 = create_test_model("openai/llama-2", "uuid3");
+        model3.author = Some("openai".to_string());
+        registry.register_model(model3).unwrap();
+
+        // Simulate: puma ls llama -l author=inftyai
+        let mut filters = std::collections::HashMap::new();
+        filters.insert("author".to_string(), "inftyai".to_string());
+        let mut models = registry.load_models(Some(&filters)).unwrap();
+
+        let pattern = "llama".to_lowercase();
+        let re = regex::Regex::new(&pattern).unwrap();
+        models.retain(|model| re.is_match(&model.name));
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "inftyai/llama-2");
     }
 }
