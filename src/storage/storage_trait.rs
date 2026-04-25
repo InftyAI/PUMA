@@ -1,10 +1,15 @@
 use crate::registry::model_registry::ModelInfo;
 use std::io;
 
+use std::collections::HashMap;
+
 /// Trait for model storage backends
 pub trait ModelStorage {
-    /// Load all models from storage
-    fn load_models(&self) -> Result<Vec<ModelInfo>, io::Error>;
+    /// Load models from storage with optional filtering by column values (e.g., author=InftyAI, license=mit)
+    fn load_models(
+        &self,
+        filters: Option<&HashMap<String, String>>,
+    ) -> Result<Vec<ModelInfo>, io::Error>;
 
     /// Register (insert or update) a single model
     fn register_model(&self, model: ModelInfo) -> Result<(), io::Error>;

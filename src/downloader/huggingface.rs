@@ -301,7 +301,7 @@ impl Downloader for HuggingFaceDownloader {
                 uuid: sha, // Use revision SHA as UUID for now
                 name: name.to_string(),
                 author: author_from_api,
-                r#type: task_from_api,
+                task: task_from_api,
                 model_series: model_series_from_api,
                 provider: "huggingface".to_string(),
                 license: license_from_api,

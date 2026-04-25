@@ -1430,6 +1430,7 @@ dependencies = [
  "indicatif",
  "log",
  "prettytable-rs",
+ "regex",
  "reqwest",
  "rusqlite",
  "rusqlite_migration",

@@ -39,7 +39,7 @@ impl SystemInfo {
         let cache_size = Self::calculate_cache_size(&cache_dir);
 
         let registry = ModelRegistry::new(None);
-        let models_count = registry.load_models().unwrap_or_default().len();
+        let models_count = registry.load_models(None).unwrap_or_default().len();
 
         let gpu_info = Self::detect_gpus();
 
