@@ -107,12 +107,12 @@ pub async fn run(cli: Cli) {
             );
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "AGE"]);
             for model in models {
-                let size_str = format_size_decimal(model.size);
+                let size_str = format_size_decimal(model.metadata.cache.size);
 
-                let revision_short = if model.revision.len() > 8 {
-                    &model.revision[..8]
+                let revision_short = if model.metadata.cache.revision.len() > 8 {
+                    &model.metadata.cache.revision[..8]
                 } else {
-                    &model.revision
+                    &model.metadata.cache.revision
                 };
 
                 let created_str = format_time_ago(&model.created_at);
@@ -186,52 +186,66 @@ pub async fn run(cli: Cli) {
                     println!("Name: {}", model.name);
                     println!("Kind: Model");
                     println!("Spec:");
-                    if let Some(spec) = &model.spec {
-                        println!(
-                            "  Author:         {}",
-                            spec.author.as_deref().unwrap_or("N/A")
-                        );
-                        println!(
-                            "  Task:           {}",
-                            spec.task.as_deref().unwrap_or("N/A")
-                        );
-                        println!(
-                            "  License:        {}",
-                            spec.license
-                                .as_ref()
-                                .map(|s| s.to_uppercase())
-                                .unwrap_or_else(|| "N/A".to_string())
-                        );
-                        println!(
-                            "  Model Type:     {}",
-                            spec.model_type.as_deref().unwrap_or("N/A")
-                        );
-                        println!(
-                            "  Parameters:     {}",
-                            spec.parameters
-                                .map(crate::utils::format::format_parameters)
-                                .unwrap_or_else(|| "N/A".to_string())
-                        );
-                        println!(
-                            "  Context Window: {}",
-                            spec.context_window
-                                .map(|w| crate::utils::format::format_parameters(w as u64))
-                                .unwrap_or_else(|| "N/A".to_string())
-                        );
+                    println!(
+                        "  Author:         {}",
+                        model.author.as_deref().unwrap_or("N/A")
+                    );
+                    println!(
+                        "  Type:           {}",
+                        model.r#type.as_deref().unwrap_or("N/A")
+                    );
+                    println!(
+                        "  License:        {}",
+                        model
+                            .license
+                            .as_ref()
+                            .map(|s| s.to_uppercase())
+                            .unwrap_or_else(|| "N/A".to_string())
+                    );
+                    println!(
+                        "  Model Series:   {}",
+                        model.model_series.as_deref().unwrap_or("N/A")
+                    );
+                    println!(
+                        "  Context Window: {}",
+                        model
+                            .metadata
+                            .context_window
+                            .map(|w| crate::utils::format::format_parameters(w as u64))
+                            .unwrap_or_else(|| "N/A".to_string())
+                    );
+                    if let Some(st) = &model.metadata.safetensors {
+                        println!("  Safetensors:");
+                        if let Some(total) = st.get("total").and_then(|v| v.as_u64()) {
+                            println!(
+                                "    Total:        {}",
+                                crate::utils::format::format_parameters(total)
+                            );
+                        }
+                        if let Some(params) = st.get("parameters").and_then(|v| v.as_object()) {
+                            println!("    Parameters:");
+                            for (dtype, count) in params {
+                                if let Some(num) = count.as_u64() {
+                                    println!(
+                                        "      {:<12} {}",
+                                        format!("{}:", dtype),
+                                        crate::utils::format::format_parameters(num)
+                                    );
+                                }
+                            }
+                        }
                     } else {
-                        println!("  Author:         N/A");
-                        println!("  Task:           N/A");
-                        println!("  License:        N/A");
-                        println!("  Model Type:     N/A");
-                        println!("  Parameters:     N/A");
-                        println!("  Context Window: N/A");
+                        println!("  Safetensors:    N/A");
                     }
-                    // Registry section
-                    println!("  Registry:");
+                    // Artifact section
+                    println!("  Artifact:");
                     println!("    Provider:       {}", model.provider);
-                    println!("    Revision:       {}", model.revision);
-                    println!("    Size:           {}", format_size_decimal(model.size));
-                    println!("    Cache Path:     {}", model.cache_path);
+                    println!("    Revision:       {}", model.metadata.cache.revision);
+                    println!(
+                        "    Size:           {}",
+                        format_size_decimal(model.metadata.cache.size)
+                    );
+                    println!("    Cache Path:     {}", model.metadata.cache.path);
                     println!("Status:");
                     println!("  Created:        {}", format_time_ago(&model.created_at));
                     println!("  Updated:        {}", format_time_ago(&model.updated_at));
@@ -256,8 +270,39 @@ pub async fn run(cli: Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::ModelInfo;
+    use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata};
     use tempfile::TempDir;
+
+    // Helper to create a test model
+    fn create_test_model(name: &str, revision: &str) -> ModelInfo {
+        let safetensors = serde_json::json!({
+            "parameters": {
+                "F32": 7000000000u64
+            },
+            "total": 7000000000u64
+        });
+
+        ModelInfo {
+            uuid: revision.to_string(),
+            name: name.to_string(),
+            author: Some("test-author".to_string()),
+            r#type: Some("text-generation".to_string()),
+            model_series: Some("gpt2".to_string()),
+            provider: "huggingface".to_string(),
+            license: Some("mit".to_string()),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            metadata: ModelMetadata {
+                cache: CacheInfo {
+                    revision: revision.to_string(),
+                    size: 1000,
+                    path: "/tmp/test".to_string(),
+                },
+                context_window: Some(2048),
+                safetensors: Some(safetensors),
+            },
+        }
+    }
 
     #[test]
     fn test_ls_command_empty() {
@@ -273,16 +318,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123def456".to_string(),
-            size: 1_000_000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
+        let model = create_test_model("test/model", "abc123def456");
 
         registry.register_model(model).unwrap();
 
@@ -297,23 +333,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/gpt-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123def456".to_string(),
-            size: 7_000_000_000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-02T00:00:00Z".to_string(),
-            cache_path: "/tmp/test/gpt".to_string(),
-            spec: Some(crate::registry::model_registry::ModelSpec {
-                model_type: Some("gpt2".to_string()),
-                parameters: Some(7_000_000_000),
-                context_window: Some(2048),
-                author: Some("test-org".to_string()),
-                task: Some("text-generation".to_string()),
-                license: Some("mit".to_string()),
-            }),
-        };
+        let mut model = create_test_model("test/gpt-model", "abc123def456");
+        model.author = Some("test-org".to_string());
+        model.r#type = Some("text-generation".to_string());
+        model.license = Some("mit".to_string());
+        model.updated_at = "2025-01-02T00:00:00Z".to_string();
 
         registry.register_model(model.clone()).unwrap();
 
@@ -324,14 +348,23 @@ mod tests {
         assert_eq!(model_info.name, "test/gpt-model");
         assert_eq!(model_info.created_at, "2025-01-01T00:00:00Z");
         assert_eq!(model_info.updated_at, "2025-01-02T00:00:00Z");
-
-        let spec = model_info.spec.as_ref().unwrap();
-        assert_eq!(spec.author, Some("test-org".to_string()));
-        assert_eq!(spec.task, Some("text-generation".to_string()));
-        assert_eq!(spec.license, Some("mit".to_string()));
-        assert_eq!(spec.model_type, Some("gpt2".to_string()));
-        assert_eq!(spec.context_window, Some(2048));
-        assert_eq!(spec.parameters, Some(7_000_000_000));
+        assert_eq!(model_info.author, Some("test-org".to_string()));
+        assert_eq!(model_info.r#type, Some("text-generation".to_string()));
+        assert_eq!(model_info.license, Some("mit".to_string()));
+        assert_eq!(model_info.model_series, Some("gpt2".to_string()));
+        assert_eq!(model_info.metadata.context_window, Some(2048));
+        assert_eq!(
+            model_info
+                .metadata
+                .safetensors
+                .as_ref()
+                .unwrap()
+                .get("total")
+                .unwrap()
+                .as_u64()
+                .unwrap(),
+            7_000_000_000
+        );
     }
 
     #[test]
@@ -339,16 +372,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/simple-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "xyz789".to_string(),
-            size: 500_000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test/simple".to_string(),
-            spec: None,
-        };
+        let mut model = create_test_model("test/simple-model", "xyz789");
+        model.metadata.safetensors = None;
+        model.metadata.context_window = None;
 
         registry.register_model(model).unwrap();
 
@@ -357,7 +383,7 @@ mod tests {
 
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/simple-model");
-        assert!(model_info.spec.is_none());
+        assert!(model_info.metadata.safetensors.is_none());
     }
 
     #[test]
@@ -365,16 +391,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/remove-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "abc123".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test/remove".to_string(),
-            spec: None,
-        };
+        let model = create_test_model("test/remove-model", "abc123");
 
         registry.register_model(model).unwrap();
         assert!(registry.get_model("test/remove-model").unwrap().is_some());
@@ -419,30 +436,14 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
 
-        let model = ModelInfo {
-            name: "test/updated-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "v1".to_string(),
-            size: 1000,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
-
+        let model = create_test_model("test/updated-model", "v1");
         registry.register_model(model).unwrap();
 
         // Update the model
-        let updated_model = ModelInfo {
-            name: "test/updated-model".to_string(),
-            provider: "huggingface".to_string(),
-            revision: "v2".to_string(),
-            size: 2000,
-            created_at: "2025-01-05T00:00:00Z".to_string(),
-            updated_at: "2025-01-05T00:00:00Z".to_string(),
-            cache_path: "/tmp/test".to_string(),
-            spec: None,
-        };
+        let mut updated_model = create_test_model("test/updated-model", "v2");
+        updated_model.metadata.cache.size = 2000;
+        updated_model.created_at = "2025-01-05T00:00:00Z".to_string();
+        updated_model.updated_at = "2025-01-05T00:00:00Z".to_string();
 
         registry.register_model(updated_model).unwrap();
 
@@ -452,7 +453,7 @@ mod tests {
         // updated_at should be new
         assert_eq!(result.updated_at, "2025-01-05T00:00:00Z");
         // Other fields should be updated
-        assert_eq!(result.revision, "v2");
-        assert_eq!(result.size, 2000);
+        assert_eq!(result.metadata.cache.revision, "v2");
+        assert_eq!(result.metadata.cache.size, 2000);
     }
 }

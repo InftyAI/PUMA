@@ -1,6 +1,7 @@
 mod cli;
 mod downloader;
 mod registry;
+mod storage;
 mod system;
 mod utils;
 
