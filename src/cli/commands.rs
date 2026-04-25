@@ -107,12 +107,12 @@ pub async fn run(cli: Cli) {
             );
             table.add_row(row!["MODEL", "PROVIDER", "REVISION", "SIZE", "AGE"]);
             for model in models {
-                let size_str = format_size_decimal(model.metadata.cache.size);
+                let size_str = format_size_decimal(model.metadata.artifact.size);
 
-                let revision_short = if model.metadata.cache.revision.len() > 8 {
-                    &model.metadata.cache.revision[..8]
+                let revision_short = if model.metadata.artifact.revision.len() > 8 {
+                    &model.metadata.artifact.revision[..8]
                 } else {
-                    &model.metadata.cache.revision
+                    &model.metadata.artifact.revision
                 };
 
                 let created_str = format_time_ago(&model.created_at);
@@ -240,12 +240,12 @@ pub async fn run(cli: Cli) {
                     // Artifact section
                     println!("  Artifact:");
                     println!("    Provider:       {}", model.provider);
-                    println!("    Revision:       {}", model.metadata.cache.revision);
+                    println!("    Revision:       {}", model.metadata.artifact.revision);
                     println!(
                         "    Size:           {}",
-                        format_size_decimal(model.metadata.cache.size)
+                        format_size_decimal(model.metadata.artifact.size)
                     );
-                    println!("    Cache Path:     {}", model.metadata.cache.path);
+                    println!("    Cache Path:     {}", model.metadata.artifact.path);
                     println!("Status:");
                     println!("  Created:        {}", format_time_ago(&model.created_at));
                     println!("  Updated:        {}", format_time_ago(&model.updated_at));
@@ -270,7 +270,7 @@ pub async fn run(cli: Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata};
+    use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata};
     use tempfile::TempDir;
 
     // Helper to create a test model
@@ -293,7 +293,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                cache: CacheInfo {
+                artifact: ArtifactInfo {
                     revision: revision.to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
@@ -441,7 +441,7 @@ mod tests {
 
         // Update the model
         let mut updated_model = create_test_model("test/updated-model", "v2");
-        updated_model.metadata.cache.size = 2000;
+        updated_model.metadata.artifact.size = 2000;
         updated_model.created_at = "2025-01-05T00:00:00Z".to_string();
         updated_model.updated_at = "2025-01-05T00:00:00Z".to_string();
 
@@ -453,7 +453,7 @@ mod tests {
         // updated_at should be new
         assert_eq!(result.updated_at, "2025-01-05T00:00:00Z");
         // Other fields should be updated
-        assert_eq!(result.metadata.cache.revision, "v2");
-        assert_eq!(result.metadata.cache.size, 2000);
+        assert_eq!(result.metadata.artifact.revision, "v2");
+        assert_eq!(result.metadata.artifact.size, 2000);
     }
 }

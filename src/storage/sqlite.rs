@@ -41,15 +41,13 @@ impl SqliteStorage {
             // Future migrations go here
         ]);
 
-        migrations
-            .to_latest(&mut conn)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        migrations.to_latest(&mut conn).map_err(io::Error::other)?;
 
         Ok(())
     }
 
     fn get_connection(&self) -> Result<Connection, io::Error> {
-        Connection::open(&self.db_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        Connection::open(&self.db_path).map_err(io::Error::other)
     }
 }
 
@@ -63,7 +61,7 @@ impl ModelStorage for SqliteStorage {
                         metadata, created_at, updated_at
                  FROM models",
             )
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         let models = stmt
             .query_map([], |row| {
@@ -84,9 +82,9 @@ impl ModelStorage for SqliteStorage {
                     updated_at: row.get(9)?,
                 })
             })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+            .map_err(io::Error::other)?
             .collect::<SqlResult<Vec<_>>>()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         Ok(models)
     }
@@ -126,7 +124,7 @@ impl ModelStorage for SqliteStorage {
                 &model.updated_at,
             ],
         )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
         Ok(())
     }
@@ -135,7 +133,7 @@ impl ModelStorage for SqliteStorage {
         let conn = self.get_connection()?;
 
         conn.execute("DELETE FROM models WHERE name = ?1", params![name])
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         Ok(())
     }
@@ -171,7 +169,7 @@ impl ModelStorage for SqliteStorage {
         match result {
             Ok(model) => Ok(Some(model)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            Err(e) => Err(io::Error::other(e)),
         }
     }
 }
@@ -179,7 +177,7 @@ impl ModelStorage for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{CacheInfo, ModelMetadata};
+    use crate::registry::model_registry::{ArtifactInfo, ModelMetadata};
     use tempfile::TempDir;
 
     fn create_test_model(name: &str, uuid: &str) -> ModelInfo {
@@ -199,7 +197,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                cache: CacheInfo {
+                artifact: ArtifactInfo {
                     revision: "abc123".to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
@@ -290,8 +288,8 @@ mod tests {
         storage.register_model(model).unwrap();
 
         let retrieved = storage.get_model("test/model").unwrap().unwrap();
-        assert_eq!(retrieved.metadata.cache.revision, "abc123");
-        assert_eq!(retrieved.metadata.cache.size, 1000);
+        assert_eq!(retrieved.metadata.artifact.revision, "abc123");
+        assert_eq!(retrieved.metadata.artifact.size, 1000);
         assert_eq!(retrieved.metadata.context_window, Some(2048));
         assert!(retrieved.metadata.safetensors.is_some());
 
