@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
 
+use crate::cli::{inspect, ls, rm};
 use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
 use crate::registry::model_registry::ModelRegistry;
@@ -107,45 +108,13 @@ pub async fn run(cli: Cli) {
         Commands::LS(args) => {
             let registry = ModelRegistry::new(None);
 
-            // Parse query filters if provided (e.g., "author=inftyai,license=mit")
-            let mut query_filters = std::collections::HashMap::new();
-            if let Some(query_str) = &args.query {
-                for pair in query_str.split(',') {
-                    if let Some((key, value)) = pair.split_once('=') {
-                        query_filters.insert(key.trim().to_string(), value.trim().to_string());
-                    } else {
-                        eprintln!("Invalid query format: {}. Expected key=value pairs separated by commas.", pair);
-                        std::process::exit(1);
-                    }
+            let models = match ls::execute(&registry, args.pattern.as_deref(), args.query.as_deref()) {
+                Ok(models) => models,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
                 }
-            }
-
-            // Load models with optional SQL filters
-            let filter_ref = if query_filters.is_empty() {
-                None
-            } else {
-                Some(&query_filters)
             };
-
-            let mut models = registry.load_models(filter_ref).unwrap_or_else(|e| {
-                eprintln!("Failed to query models: {}", e);
-                std::process::exit(1);
-            });
-
-            // Filter models by name pattern if provided (supports regex)
-            // Note: model names are already stored in lowercase in the database
-            if let Some(pattern) = &args.pattern {
-                let pattern_lower = pattern.to_lowercase();
-                match regex::Regex::new(&pattern_lower) {
-                    Ok(re) => {
-                        models.retain(|model| re.is_match(&model.name));
-                    }
-                    Err(e) => {
-                        eprintln!("Invalid regex pattern '{}': {}", pattern, e);
-                        std::process::exit(1);
-                    }
-                }
-            }
 
             let mut table = Table::new();
             table.set_format(
@@ -202,23 +171,9 @@ pub async fn run(cli: Cli) {
         Commands::RM(args) => {
             let registry = ModelRegistry::new(None);
 
-            // Check if model exists first
-            match registry.get_model(&args.model) {
-                Ok(Some(_)) => {
-                    // Delete model (cache + registry)
-                    if let Err(e) = registry.remove_model(&args.model) {
-                        eprintln!("Failed to remove model: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-                Ok(None) => {
-                    eprintln!("Model not found: {}", args.model);
-                    std::process::exit(1);
-                }
-                Err(e) => {
-                    eprintln!("Failed to load registry: {}", e);
-                    std::process::exit(1);
-                }
+            if let Err(e) = rm::execute(&registry, &args.model) {
+                eprintln!("{}", e);
+                std::process::exit(1);
             }
         }
 
@@ -230,81 +185,10 @@ pub async fn run(cli: Cli) {
         Commands::INSPECT(args) => {
             let registry = ModelRegistry::new(None);
 
-            match registry.get_model(&args.model) {
-                Ok(Some(model)) => {
-                    println!("Name: {}", model.name);
-                    println!("Kind: Model");
-                    println!("Spec:");
-                    println!(
-                        "  Author:         {}",
-                        model.author.as_deref().unwrap_or("N/A")
-                    );
-                    println!(
-                        "  Type:           {}",
-                        model.r#type.as_deref().unwrap_or("N/A")
-                    );
-                    println!(
-                        "  License:        {}",
-                        model
-                            .license
-                            .as_ref()
-                            .map(|s| s.to_uppercase())
-                            .unwrap_or_else(|| "N/A".to_string())
-                    );
-                    println!(
-                        "  Model Series:   {}",
-                        model.model_series.as_deref().unwrap_or("N/A")
-                    );
-                    println!(
-                        "  Context Window: {}",
-                        model
-                            .metadata
-                            .context_window
-                            .map(|w| crate::utils::format::format_parameters(w as u64))
-                            .unwrap_or_else(|| "N/A".to_string())
-                    );
-                    if let Some(st) = &model.metadata.safetensors {
-                        println!("  Safetensors:");
-                        if let Some(total) = st.get("total").and_then(|v| v.as_u64()) {
-                            println!(
-                                "    Total:        {}",
-                                crate::utils::format::format_parameters(total)
-                            );
-                        }
-                        if let Some(params) = st.get("parameters").and_then(|v| v.as_object()) {
-                            println!("    Parameters:");
-                            for (dtype, count) in params {
-                                if let Some(num) = count.as_u64() {
-                                    println!(
-                                        "      {:<12} {}",
-                                        format!("{}:", dtype),
-                                        crate::utils::format::format_parameters(num)
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        println!("  Safetensors:    N/A");
-                    }
-                    // Artifact section
-                    println!("  Artifact:");
-                    println!("    Provider:       {}", model.provider);
-                    println!("    Revision:       {}", model.metadata.artifact.revision);
-                    println!(
-                        "    Size:           {}",
-                        format_size_decimal(model.metadata.artifact.size)
-                    );
-                    println!("    Cache Path:     {}", model.metadata.artifact.path);
-                    println!("Status:");
-                    println!("  Created:        {}", format_time_ago(&model.created_at));
-                    println!("  Updated:        {}", format_time_ago(&model.updated_at));
-                }
-                Ok(None) => {
-                    eprintln!("Model not found: {}", args.model);
-                    std::process::exit(1);
-                }
+            match inspect::execute(&registry, &args.model) {
+                Ok(model) => inspect::display(&model),
                 Err(e) => {
-                    eprintln!("Failed to load registry: {}", e);
+                    eprintln!("{}", e);
                     std::process::exit(1);
                 }
             }
@@ -436,42 +320,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rm_command() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        // Create a fake cache directory
-        let cache_dir = temp_dir.path().join("cache");
-        std::fs::create_dir_all(&cache_dir).unwrap();
-        std::fs::write(cache_dir.join("model.safetensors"), "fake data").unwrap();
-
-        let mut model = create_test_model("test/remove-model", "abc123");
-        model.metadata.artifact.path = cache_dir.to_string_lossy().to_string();
-
-        registry.register_model(model).unwrap();
-        assert!(registry.get_model("test/remove-model").unwrap().is_some());
-        assert!(cache_dir.exists());
-
-        // Simulate RM command - actually remove the model
-        registry.remove_model("test/remove-model").unwrap();
-
-        // Verify model is removed from registry
-        assert!(registry.get_model("test/remove-model").unwrap().is_none());
-        // Verify cache directory is deleted
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn test_rm_command_nonexistent() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        // Simulate RM command on non-existent model - should not error
-        let result = registry.remove_model("nonexistent/model");
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_revision_truncation() {
         let long_revision = "abc123def456ghi789jkl012";
         let short = if long_revision.len() > 8 {
@@ -516,131 +364,4 @@ mod tests {
         assert_eq!(result.metadata.artifact.size, 2000);
     }
 
-    #[test]
-    fn test_ls_with_pattern_substring() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        registry.register_model(create_test_model("inftyai/model1", "uuid1")).unwrap();
-        registry.register_model(create_test_model("openai/gpt2", "uuid2")).unwrap();
-        registry.register_model(create_test_model("inftyai/model2", "uuid3")).unwrap();
-
-        // Simulate: puma ls inftyai
-        let mut models = registry.load_models(None).unwrap();
-        let pattern = "inftyai".to_lowercase();
-        let re = regex::Regex::new(&pattern).unwrap();
-        models.retain(|model| re.is_match(&model.name));
-
-        assert_eq!(models.len(), 2);
-        assert!(models.iter().all(|m| m.name.contains("inftyai")));
-    }
-
-    #[test]
-    fn test_ls_with_pattern_prefix() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        registry.register_model(create_test_model("inftyai/model1", "uuid1")).unwrap();
-        registry.register_model(create_test_model("openai/gpt2", "uuid2")).unwrap();
-        registry.register_model(create_test_model("meta/llama", "uuid3")).unwrap();
-
-        // Simulate: puma ls "^inftyai/"
-        let mut models = registry.load_models(None).unwrap();
-        let pattern = "^inftyai/".to_lowercase();
-        let re = regex::Regex::new(&pattern).unwrap();
-        models.retain(|model| re.is_match(&model.name));
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "inftyai/model1");
-    }
-
-    #[test]
-    fn test_ls_with_pattern_case_insensitive() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        registry.register_model(create_test_model("InftyAI/Model1", "uuid1")).unwrap();
-        registry.register_model(create_test_model("OpenAI/GPT2", "uuid2")).unwrap();
-
-        // Simulate: puma ls InftyAI (user input with mixed case)
-        let mut models = registry.load_models(None).unwrap();
-        let pattern = "InftyAI".to_lowercase();
-        let re = regex::Regex::new(&pattern).unwrap();
-        models.retain(|model| re.is_match(&model.name));
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "inftyai/model1");
-    }
-
-    #[test]
-    fn test_ls_with_pattern_alternation() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        registry.register_model(create_test_model("meta/llama-2", "uuid1")).unwrap();
-        registry.register_model(create_test_model("meta/llama-3", "uuid2")).unwrap();
-        registry.register_model(create_test_model("meta/llama-4", "uuid3")).unwrap();
-
-        // Simulate: puma ls "llama-(2|3)"
-        let mut models = registry.load_models(None).unwrap();
-        let pattern = "llama-(2|3)".to_lowercase();
-        let re = regex::Regex::new(&pattern).unwrap();
-        models.retain(|model| re.is_match(&model.name));
-
-        assert_eq!(models.len(), 2);
-        assert!(models.iter().any(|m| m.name == "meta/llama-2"));
-        assert!(models.iter().any(|m| m.name == "meta/llama-3"));
-    }
-
-    #[test]
-    fn test_ls_with_sql_filter() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        let mut model1 = create_test_model("inftyai/model1", "uuid1");
-        model1.author = Some("inftyai".to_string());
-        registry.register_model(model1).unwrap();
-
-        let mut model2 = create_test_model("openai/gpt2", "uuid2");
-        model2.author = Some("openai".to_string());
-        registry.register_model(model2).unwrap();
-
-        // Simulate: puma ls -l author=inftyai
-        let mut filters = std::collections::HashMap::new();
-        filters.insert("author".to_string(), "inftyai".to_string());
-        let models = registry.load_models(Some(&filters)).unwrap();
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "inftyai/model1");
-    }
-
-    #[test]
-    fn test_ls_with_pattern_and_sql_filter() {
-        let temp_dir = TempDir::new().unwrap();
-        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
-
-        let mut model1 = create_test_model("inftyai/llama-2", "uuid1");
-        model1.author = Some("inftyai".to_string());
-        registry.register_model(model1).unwrap();
-
-        let mut model2 = create_test_model("inftyai/gpt2", "uuid2");
-        model2.author = Some("inftyai".to_string());
-        registry.register_model(model2).unwrap();
-
-        let mut model3 = create_test_model("openai/llama-2", "uuid3");
-        model3.author = Some("openai".to_string());
-        registry.register_model(model3).unwrap();
-
-        // Simulate: puma ls llama -l author=inftyai
-        let mut filters = std::collections::HashMap::new();
-        filters.insert("author".to_string(), "inftyai".to_string());
-        let mut models = registry.load_models(Some(&filters)).unwrap();
-
-        let pattern = "llama".to_lowercase();
-        let re = regex::Regex::new(&pattern).unwrap();
-        models.retain(|model| re.is_match(&model.name));
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "inftyai/llama-2");
-    }
 }
