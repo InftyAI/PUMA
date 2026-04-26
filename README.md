@@ -263,7 +263,7 @@ make build
 make test
 
 # Run specific test suites
-cargo test --test api_test       # API integration tests
+cargo test --test api::          # API integration tests
 cargo test --test cli_test       # CLI integration tests
 
 # Test API manually
