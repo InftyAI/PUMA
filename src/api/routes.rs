@@ -4,7 +4,11 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::CorsLayer,
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+    LatencyUnit,
+};
 
 use crate::backend::InferenceEngine;
 use crate::registry::model_registry::ModelRegistry;
@@ -37,8 +41,17 @@ pub fn create_router<E: InferenceEngine + Clone + 'static>(
         .route("/health", get(health_check))
         // Pass state
         .with_state(state)
-        // Enable request/response logging
-        .layer(TraceLayer::new_for_http())
+        // Enable request/response logging at INFO level
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
+                .on_request(DefaultOnRequest::new().level(tracing::Level::INFO))
+                .on_response(
+                    DefaultOnResponse::new()
+                        .level(tracing::Level::INFO)
+                        .latency_unit(LatencyUnit::Millis),
+                ),
+        )
         // Enable CORS for browser clients
         .layer(CorsLayer::permissive())
 }
