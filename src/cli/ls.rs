@@ -52,7 +52,7 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata};
+    use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata};
     use tempfile::TempDir;
 
     fn create_test_model(name: &str, uuid: &str, author: &str) -> ModelInfo {
@@ -64,15 +64,15 @@ mod tests {
         ModelInfo {
             uuid: uuid.to_string(),
             name: name.to_string(),
+            provider: "huggingface".to_string(),
             author: Some(author.to_string()),
             task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
-            provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                artifact: ArtifactInfo {
+                cache: CacheInfo {
                     revision: uuid.to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),

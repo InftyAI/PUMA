@@ -6,7 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
-use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
+use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 use crate::utils::file::{self, format_model_name};
 
 /// Adapter to bridge HuggingFace's Progress trait with our FileProgress
@@ -284,14 +284,14 @@ impl Downloader for HuggingFaceDownloader {
             let model_size =
                 storage_from_api.unwrap_or_else(|| progress_manager.total_downloaded_bytes());
 
-            let artifact = ArtifactInfo {
+            let cache = CacheInfo {
                 revision: sha.clone(),
                 size: model_size,
                 path: model_cache_path.to_string_lossy().to_string(),
             };
 
             let metadata = ModelMetadata {
-                artifact,
+                cache,
                 context_window,
                 safetensors: safetensors_from_api,
             };
@@ -300,10 +300,10 @@ impl Downloader for HuggingFaceDownloader {
             let model_info_record = ModelInfo {
                 uuid: sha, // Use revision SHA as UUID for now
                 name: name.to_string(),
+                provider: "huggingface".to_string(),
                 author: author_from_api,
                 task: task_from_api,
                 model_series: model_series_from_api,
-                provider: "huggingface".to_string(),
                 license: license_from_api,
                 created_at: now.clone(),
                 updated_at: now,

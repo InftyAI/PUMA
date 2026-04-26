@@ -8,7 +8,7 @@ use crate::storage::{ModelStorage, SqliteStorage};
 use crate::utils::file;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ArtifactInfo {
+pub struct CacheInfo {
     pub revision: String,
     pub size: u64,
     pub path: String,
@@ -16,7 +16,7 @@ pub struct ArtifactInfo {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelMetadata {
-    pub artifact: ArtifactInfo,
+    pub cache: CacheInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -27,12 +27,12 @@ pub struct ModelMetadata {
 pub struct ModelInfo {
     pub uuid: String,
     pub name: String,
+    pub provider: String,
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<String>, // Task type (image-text-to-text, text-generation)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_series: Option<String>, // Architecture series (qwen3_5, gpt2, llama3)
-    pub provider: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     pub metadata: ModelMetadata,
@@ -81,10 +81,10 @@ impl ModelRegistry {
         let model_info = self.get_model(name)?;
 
         if let Some(info) = model_info {
-            // Delete artifact directory if it exists
-            let artifact_path = std::path::Path::new(&info.metadata.artifact.path);
-            if artifact_path.exists() {
-                fs::remove_dir_all(artifact_path)?;
+            // Delete cache directory if it exists
+            let cache_path = std::path::Path::new(&info.metadata.cache.path);
+            if cache_path.exists() {
+                fs::remove_dir_all(cache_path)?;
             }
 
             // Remove from registry
@@ -119,15 +119,15 @@ mod tests {
         ModelInfo {
             uuid: revision.to_string(),
             name: name.to_string(),
+            provider: "huggingface".to_string(),
             author: Some("test-author".to_string()),
             task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
-            provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                artifact: ArtifactInfo {
+                cache: CacheInfo {
                     revision: revision.to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
@@ -202,8 +202,8 @@ mod tests {
         registry.register_model(model1).unwrap();
 
         let mut model2 = create_test_model("test/model", "def456");
-        model2.metadata.artifact.size = 2000;
-        model2.metadata.artifact.path = "/tmp/test2".to_string();
+        model2.metadata.cache.size = 2000;
+        model2.metadata.cache.path = "/tmp/test2".to_string();
         model2.created_at = "2025-01-02T00:00:00Z".to_string();
         model2.updated_at = "2025-01-02T00:00:00Z".to_string();
 
@@ -211,8 +211,8 @@ mod tests {
 
         let models = registry.load_models(None).unwrap();
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].metadata.artifact.revision, "def456");
-        assert_eq!(models[0].metadata.artifact.size, 2000);
+        assert_eq!(models[0].metadata.cache.revision, "def456");
+        assert_eq!(models[0].metadata.cache.size, 2000);
         // created_at should be preserved from model1
         assert_eq!(models[0].created_at, "2025-01-01T00:00:00Z");
         // updated_at should be from model2
@@ -230,7 +230,7 @@ mod tests {
         fs::write(cache_dir.join("test.txt"), "test data").unwrap();
 
         let mut model = create_test_model("test/model", "abc123");
-        model.metadata.artifact.path = cache_dir.to_string_lossy().to_string();
+        model.metadata.cache.path = cache_dir.to_string_lossy().to_string();
 
         registry.register_model(model).unwrap();
         assert_eq!(registry.load_models(None).unwrap().len(), 1);
@@ -271,7 +271,7 @@ mod tests {
         let model_info = retrieved.unwrap();
         assert_eq!(model_info.name, "test/gpt-model");
         assert_eq!(model_info.provider, "huggingface");
-        assert_eq!(model_info.metadata.artifact.revision, "abc123def456");
+        assert_eq!(model_info.metadata.cache.revision, "abc123def456");
         assert_eq!(model_info.model_series, Some("gpt2".to_string()));
         assert_eq!(model_info.metadata.context_window, Some(2048));
         assert_eq!(

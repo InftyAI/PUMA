@@ -112,10 +112,10 @@ impl ModelStorage for SqliteStorage {
                 Ok(ModelInfo {
                     uuid: row.get(0)?,
                     name: row.get(1)?,
+                    provider: row.get(5)?,
                     author: row.get(2)?,
                     task: row.get(3)?,
                     model_series: row.get(4)?,
-                    provider: row.get(5)?,
                     license: row.get(6)?,
                     metadata,
                     created_at: row.get(8)?,
@@ -202,10 +202,10 @@ impl ModelStorage for SqliteStorage {
                 Ok(ModelInfo {
                     uuid: row.get(0)?,
                     name: row.get(1)?,
+                    provider: row.get(5)?,
                     author: row.get(2)?,
                     task: row.get(3)?,
                     model_series: row.get(4)?,
-                    provider: row.get(5)?,
                     license: row.get(6)?,
                     created_at: row.get(8)?,
                     updated_at: row.get(9)?,
@@ -225,7 +225,7 @@ impl ModelStorage for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{ArtifactInfo, ModelMetadata};
+    use crate::registry::model_registry::{CacheInfo, ModelMetadata};
     use tempfile::TempDir;
 
     fn create_test_model(name: &str, uuid: &str) -> ModelInfo {
@@ -237,15 +237,15 @@ mod tests {
         ModelInfo {
             uuid: uuid.to_string(),
             name: name.to_string(),
+            provider: "huggingface".to_string(),
             author: Some("test-author".to_string()),
             task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
-            provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                artifact: ArtifactInfo {
+                cache: CacheInfo {
                     revision: "abc123".to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
@@ -336,8 +336,8 @@ mod tests {
         storage.register_model(model).unwrap();
 
         let retrieved = storage.get_model("test/model").unwrap().unwrap();
-        assert_eq!(retrieved.metadata.artifact.revision, "abc123");
-        assert_eq!(retrieved.metadata.artifact.size, 1000);
+        assert_eq!(retrieved.metadata.cache.revision, "abc123");
+        assert_eq!(retrieved.metadata.cache.size, 1000);
         assert_eq!(retrieved.metadata.context_window, Some(2048));
         assert!(retrieved.metadata.safetensors.is_some());
 
