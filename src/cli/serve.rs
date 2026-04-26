@@ -1,3 +1,4 @@
+use colored::Colorize;
 use log::{debug, info};
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use crate::registry::model_registry::ModelRegistry;
 /// Execute the serve command
 pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!(
+        "{}",
         "
  ███████████  █████  █████ ██████   ██████   █████████
 ░░███░░░░░███░░███  ░░███ ░░██████ ██████   ███░░░░░███
@@ -18,6 +20,8 @@ pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Er
  █████        ░░████████   █████     █████ █████   █████
 ░░░░░          ░░░░░░░░   ░░░░░     ░░░░░ ░░░░░   ░░░░░
                                                         "
+        .bright_blue()
+        .bold()
     );
     info!("Starting PUMA inference server");
 

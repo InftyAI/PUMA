@@ -1,8 +1,8 @@
-// lib.rs exposes modules for integration tests
-// Internal modules are not intended for external use
+// lib.rs - internal modules for the PUMA binary
+// Modules are private as PUMA is primarily a CLI tool, not a library
 
-pub mod api;
-pub mod backend;
-pub mod registry;
-pub mod storage;
-pub mod utils;
+mod api;
+mod backend;
+mod registry;
+mod storage;
+mod utils;

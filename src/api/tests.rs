@@ -9,16 +9,18 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
+use tempfile::TempDir;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
-use puma::api::create_router;
-use puma::backend::mock::MockEngine;
-use puma::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
+use crate::api::create_router;
+use crate::backend::mock::MockEngine;
+use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
 fn create_test_app() -> axum::Router {
     let engine = Arc::new(MockEngine::new());
-    let registry = Arc::new(ModelRegistry::new(None));
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(ModelRegistry::new(Some(temp_dir.path().to_path_buf())));
 
     // Register a test model
     let test_model = ModelInfo {
