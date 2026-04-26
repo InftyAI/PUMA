@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Chat completion request (OpenAI compatible)
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ChatCompletionRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
@@ -31,6 +32,7 @@ pub struct ChatMessage {
 
 /// Legacy text completion request
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct CompletionRequest {
     pub model: String,
     #[serde(alias = "prompt")]
