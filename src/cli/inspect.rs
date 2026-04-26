@@ -19,6 +19,11 @@ pub fn display(model: &ModelInfo) {
         "  author:         {}",
         model.author.as_deref().unwrap_or("N/A")
     );
+    println!("  provider:       {}", model.provider);
+    println!(
+        "  model_series:   {}",
+        model.model_series.as_deref().unwrap_or("N/A")
+    );
     println!(
         "  task:           {}",
         model.task.as_deref().unwrap_or("N/A")
@@ -30,10 +35,6 @@ pub fn display(model: &ModelInfo) {
             .as_ref()
             .map(|s| s.to_uppercase())
             .unwrap_or_else(|| "N/A".to_string())
-    );
-    println!(
-        "  model_series:   {}",
-        model.model_series.as_deref().unwrap_or("N/A")
     );
     println!(
         "  context_window: {}",
@@ -65,15 +66,14 @@ pub fn display(model: &ModelInfo) {
         println!("  safetensors:    N/A");
     }
 
-    // Artifact section
-    println!("  artifact:");
-    println!("    provider:       {}", model.provider);
+    // Cache section
+    println!("  cache:");
     println!("    revision:       {}", model.metadata.cache.revision);
     println!(
         "    size:           {}",
         format_size_decimal(model.metadata.cache.size)
     );
-    println!("    cache_path:     {}", model.metadata.cache.path);
+    println!("    path:           {}", model.metadata.cache.path);
     println!("status:");
     println!("  created:        {}", format_time_ago(&model.created_at));
     println!("  updated:        {}", format_time_ago(&model.updated_at));
