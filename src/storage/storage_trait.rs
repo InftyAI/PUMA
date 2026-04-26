@@ -4,7 +4,7 @@ use std::io;
 use std::collections::HashMap;
 
 /// Trait for model storage backends
-pub trait ModelStorage {
+pub trait ModelStorage: Send + Sync {
     /// Load models from storage with optional filtering by column values (e.g., author=InftyAI, license=mit)
     fn load_models(
         &self,

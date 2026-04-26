@@ -21,6 +21,8 @@
 
 💻 **System Detection** - Automatic GPU detection and resource reporting
 
+🚀 **OpenAI-Compatible API** - RESTful API with streaming support
+
 ## Installation
 
 ### Install with Cargo
@@ -45,6 +47,8 @@ make build
 
 ## Quick Start
 
+### CLI Usage
+
 ```bash
 # Download a model
 puma pull inftyai/tiny-random-gpt2
@@ -62,6 +66,39 @@ puma info
 puma rm inftyai/tiny-random-gpt2
 ```
 
+### API Server
+
+```bash
+# Start the inference server
+puma serve
+
+# Server will start on http://0.0.0.0:8000
+# API endpoints:
+#   POST /v1/chat/completions
+#   POST /v1/completions
+#   GET  /v1/models
+#   GET  /v1/models/:model
+#   GET  /health
+```
+
+**Test the API:**
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Chat completion
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "inftyai/tiny-random-gpt2",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Or use the test script
+./hack/scripts/test_api.sh
+```
+
 ## Commands
 
 | Command | Status | Description |
@@ -72,6 +109,7 @@ puma rm inftyai/tiny-random-gpt2
 | `rm <model>` | ✅ | Remove model and cache |
 | `info` | ✅ | Display system information |
 | `version` | ✅ | Show PUMA version |
+| `serve` | ✅ | Start OpenAI-compatible API server |
 | `ps` | 🚧 | List running models |
 | `run` | 🚧 | Start model inference |
 | `stop` | 🚧 | Stop running model |
@@ -105,6 +143,81 @@ puma ls llama -l author=meta
 ```
 
 **Available filters:** `author`, `task`, `license`, `provider`, `model_series`
+
+## API Server
+
+PUMA provides an OpenAI-compatible API server for model inference.
+
+### Starting the Server
+
+```bash
+# Default: 0.0.0.0:8000
+puma serve
+
+# Custom host and port
+puma serve --host 127.0.0.1 --port 3000
+```
+
+### API Endpoints
+
+#### Chat Completions (Recommended)
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "inftyai/tiny-random-gpt2",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Hello!"}
+    ],
+    "max_tokens": 100,
+    "temperature": 0.7
+  }'
+```
+
+#### Streaming (Server-Sent Events)
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "inftyai/tiny-random-gpt2",
+    "messages": [{"role": "user", "content": "Tell me a story"}],
+    "stream": true
+  }'
+```
+
+#### List Models
+```bash
+curl http://localhost:8000/v1/models
+```
+
+#### Health Check
+```bash
+curl http://localhost:8000/health
+# Returns: {"status":"ok","version":"0.0.2"}
+```
+
+### OpenAI Python Client
+
+PUMA is compatible with the OpenAI Python SDK:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="dummy"  # Not required
+)
+
+response = client.chat.completions.create(
+    model="inftyai/tiny-random-gpt2",
+    messages=[
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
 
 ### Inspect Output
 
@@ -146,8 +259,11 @@ Models are stored with lowercase names for case-insensitive matching.
 # Build
 make build
 
-# Run tests (67 unit + 22 integration)
+# Run all tests
 make test
+
+# Test API manually
+./hack/scripts/test_api.sh
 ```
 
 ### Project Structure
@@ -155,13 +271,16 @@ make test
 ```
 puma/
 ├── src/
-│   ├── cli/          # Command implementations (ls, rm, inspect)
+│   ├── api/          # OpenAI-compatible API
+│   ├── backend/      # Inference backends (Mock, MLX)
+│   ├── cli/          # Command implementations
 │   ├── downloader/   # HuggingFace download logic
 │   ├── registry/     # Model registry & metadata
 │   ├── storage/      # SQLite storage backend
 │   ├── system/       # System info detection
 │   └── utils/        # Formatting & helpers
 ├── tests/            # Integration tests
+├── hack/             # Development scripts
 ├── Cargo.toml        # Rust dependencies
 └── Makefile          # Build commands
 ```

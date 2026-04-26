@@ -37,6 +37,19 @@ enum Commands {
     INSPECT(InspectArgs),
     /// Returns the version of PUMA.
     VERSION,
+    /// Start the inference server
+    SERVE(ServeArgs),
+}
+
+#[derive(Parser)]
+struct ServeArgs {
+    /// Host address to bind to
+    #[arg(long, default_value = "0.0.0.0")]
+    host: String,
+
+    /// Port to listen on
+    #[arg(short, long, default_value = "8000")]
+    port: u16,
 }
 
 #[derive(Parser)]
@@ -203,6 +216,13 @@ pub async fn run(cli: Cli) {
 
         Commands::VERSION => {
             println!("PUMA {}", env!("CARGO_PKG_VERSION"));
+        }
+
+        Commands::SERVE(args) => {
+            if let Err(e) = crate::cli::serve::execute(&args.host, args.port).await {
+                eprintln!("Error starting server: {}", e);
+                std::process::exit(1);
+            }
         }
     }
 }

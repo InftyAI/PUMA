@@ -1,3 +1,8 @@
+//! CLI Integration Tests
+//!
+//! Tests the PUMA command-line interface by executing the binary
+//! and verifying output. These tests use real processes and temporary directories.
+
 use std::process::Command;
 use tempfile::TempDir;
 
