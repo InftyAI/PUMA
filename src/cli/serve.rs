@@ -2,7 +2,7 @@ use colored::Colorize;
 use log::{debug, info};
 use std::sync::Arc;
 
-use crate::api::create_router;
+use crate::api::routes::create_router;
 use crate::backend::mock::MockEngine;
 use crate::registry::model_registry::ModelRegistry;
 

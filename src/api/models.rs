@@ -64,7 +64,7 @@ pub async fn get_model<E: InferenceEngine + 'static>(
             axum::http::StatusCode::NOT_FOUND,
             Json(ErrorResponse::new(
                 format!("Model '{}' not found", model_id),
-                "not_found_error".to_string(),
+                "model_not_found".to_string(),
             )),
         )
             .into_response(),

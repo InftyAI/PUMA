@@ -12,12 +12,13 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
-use crate::api::create_router;
+use super::routes::create_router;
 use crate::backend::mock::MockEngine;
 use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
-fn create_test_app() -> axum::Router {
+/// Returns the router and the temp directory (which must be kept alive)
+fn create_test_app() -> (axum::Router, TempDir) {
     let engine = Arc::new(MockEngine::new());
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(ModelRegistry::new(Some(temp_dir.path().to_path_buf())));
@@ -44,9 +45,11 @@ fn create_test_app() -> axum::Router {
         },
     };
 
-    registry.register_model(test_model).ok();
+    registry
+        .register_model(test_model)
+        .expect("failed to register test model");
 
-    create_router(engine, registry)
+    (create_router(engine, registry), temp_dir)
 }
 
 /// Helper to make a JSON request
@@ -77,12 +80,22 @@ async fn make_json_request(
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
 
+    // Debug output for failed requests
+    if !status.is_success() {
+        eprintln!("Request failed: {} {}", method, uri);
+        eprintln!("Status: {}", status);
+        eprintln!(
+            "Response: {}",
+            serde_json::to_string_pretty(&json).unwrap_or_default()
+        );
+    }
+
     (status, json)
 }
 
 #[tokio::test]
 async fn test_health_check() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let (status, json) = make_json_request(app, "GET", "/health", None).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -92,7 +105,7 @@ async fn test_health_check() {
 
 #[tokio::test]
 async fn test_list_models() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let (status, json) = make_json_request(app, "GET", "/v1/models", None).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -102,7 +115,7 @@ async fn test_list_models() {
 
 #[tokio::test]
 async fn test_chat_completion_non_streaming() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "messages": [
@@ -131,7 +144,7 @@ async fn test_chat_completion_non_streaming() {
 
 #[tokio::test]
 async fn test_chat_completion_empty_messages() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "messages": [],
@@ -151,7 +164,7 @@ async fn test_chat_completion_empty_messages() {
 
 #[tokio::test]
 async fn test_text_completion() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "prompt": "Once upon a time",
@@ -174,7 +187,7 @@ async fn test_text_completion() {
 
 #[tokio::test]
 async fn test_text_completion_empty_prompt() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "prompt": ""
@@ -193,7 +206,7 @@ async fn test_text_completion_empty_prompt() {
 
 #[tokio::test]
 async fn test_chat_completion_with_system_message() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "messages": [
@@ -213,7 +226,7 @@ async fn test_chat_completion_with_system_message() {
 
 #[tokio::test]
 async fn test_chat_completion_with_temperature() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "messages": [
@@ -232,7 +245,7 @@ async fn test_chat_completion_with_temperature() {
 
 #[tokio::test]
 async fn test_chat_completion_default_values() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "test-model",
         "messages": [
@@ -250,7 +263,7 @@ async fn test_chat_completion_default_values() {
 
 #[tokio::test]
 async fn test_cors_headers() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request = Request::builder()
         .uri("/health")
         .method("GET")
@@ -268,7 +281,7 @@ async fn test_cors_headers() {
 
 #[tokio::test]
 async fn test_invalid_route() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request = Request::builder()
         .uri("/invalid/route")
         .method("GET")
@@ -281,7 +294,7 @@ async fn test_invalid_route() {
 
 #[tokio::test]
 async fn test_method_not_allowed() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     // Try POST on GET-only endpoint
     let request = Request::builder()
         .uri("/health")
@@ -295,7 +308,7 @@ async fn test_method_not_allowed() {
 
 #[tokio::test]
 async fn test_chat_completion_nonexistent_model() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "nonexistent-model",
         "messages": [
@@ -317,7 +330,7 @@ async fn test_chat_completion_nonexistent_model() {
 
 #[tokio::test]
 async fn test_text_completion_nonexistent_model() {
-    let app = create_test_app();
+    let (app, _temp_dir) = create_test_app();
     let request_body = json!({
         "model": "nonexistent-model",
         "prompt": "Hello world"

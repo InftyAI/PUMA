@@ -4,6 +4,5 @@ pub mod models;
 pub mod routes;
 pub mod types;
 
-
 #[cfg(test)]
 mod tests;
