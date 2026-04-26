@@ -1,3 +1,5 @@
+mod api;
+mod backend;
 mod cli;
 mod downloader;
 mod registry;
