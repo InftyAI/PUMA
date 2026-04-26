@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/logo-light.svg">
-  <img alt="PUMA Logo" src="https://github.com/InftyAI/PUMA" width="240">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/InftyAI/PUMA/main/site/images/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/InftyAI/PUMA/main/site/images/logo-light.svg">
+  <img alt="PUMA Logo" src="https://raw.githubusercontent.com/InftyAI/PUMA/main/site/images/logo-light.svg" width="240">
 </picture>
 
 **A lightweight, high-performance inference engine for local AI**
