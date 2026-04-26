@@ -10,7 +10,7 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tempfile::TempDir;
-use tower::ServiceExt; // for `oneshot` and `ready`
+use tower::util::ServiceExt; // for `oneshot` and `ready`
 
 use super::routes::create_router;
 use crate::backend::mock::MockEngine;
@@ -202,6 +202,26 @@ async fn test_text_completion_empty_prompt() {
         .as_str()
         .unwrap()
         .contains("prompt cannot be empty"));
+}
+
+#[tokio::test]
+async fn test_text_completion_streaming_not_supported() {
+    let (app, _temp_dir) = create_test_app();
+    let request_body = json!({
+        "model": "test-model",
+        "prompt": "Hello world",
+        "stream": true
+    });
+
+    let (status, json) =
+        make_json_request(app, "POST", "/v1/completions", Some(request_body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["type"], "invalid_request_error");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Streaming not supported"));
 }
 
 #[tokio::test]

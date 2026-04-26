@@ -16,7 +16,7 @@ pub struct ChatCompletionRequest {
     pub n: Option<usize>,
     #[serde(default)]
     pub stream: bool,
-    pub stop: Option<Vec<String>>,
+    pub stop: Option<StringOrArray>,
     #[serde(default)]
     pub presence_penalty: Option<f32>,
     #[serde(default)]
@@ -47,7 +47,7 @@ pub struct CompletionRequest {
     pub n: Option<usize>,
     #[serde(default)]
     pub stream: bool,
-    pub stop: Option<Vec<String>>,
+    pub stop: Option<StringOrArray>,
     #[serde(default)]
     pub presence_penalty: Option<f32>,
     #[serde(default)]

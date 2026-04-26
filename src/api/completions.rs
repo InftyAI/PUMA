@@ -28,6 +28,18 @@ pub async fn completions<E: InferenceEngine + 'static>(
             .into_response();
     }
 
+    // TODO: Implement streaming support for /v1/completions
+    if req.stream {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::new(
+                "Streaming not supported for /v1/completions endpoint".to_string(),
+                "invalid_request_error".to_string(),
+            )),
+        )
+            .into_response();
+    }
+
     // Validate model exists
     match registry.get_model(&req.model) {
         Ok(None) => {

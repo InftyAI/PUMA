@@ -259,12 +259,8 @@ Models are stored with lowercase names for case-insensitive matching.
 # Build
 make build
 
-# Run all tests (152 tests: 67 unit + 36 integration + 49 lib)
+# Run all tests
 make test
-
-# Run specific test suites
-cargo test --test api::          # API integration tests
-cargo test --test cli_test       # CLI integration tests
 
 # Test API manually
 ./hack/scripts/test_api.sh
