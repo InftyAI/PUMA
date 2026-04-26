@@ -91,7 +91,9 @@ struct InspectArgs {
 #[derive(Debug, Clone, Default, clap::ValueEnum)]
 pub enum Provider {
     #[default]
+    #[value(alias = "hf")]
     Huggingface,
+    #[value(alias = "ms")]
     Modelscope,
 }
 
