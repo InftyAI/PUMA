@@ -9,9 +9,9 @@ pub struct ChatCompletionRequest {
     pub max_tokens: Option<usize>,
     #[serde(default = "default_temperature")]
     pub temperature: Option<f32>,
-    #[serde(default = "default_top_p")]
+    #[serde(default)]
     pub top_p: Option<f32>,
-    #[serde(default = "default_n")]
+    #[serde(default)]
     pub n: Option<usize>,
     #[serde(default)]
     pub stream: bool,
@@ -39,9 +39,9 @@ pub struct CompletionRequest {
     pub max_tokens: Option<usize>,
     #[serde(default = "default_temperature")]
     pub temperature: Option<f32>,
-    #[serde(default = "default_top_p")]
+    #[serde(default)]
     pub top_p: Option<f32>,
-    #[serde(default = "default_n")]
+    #[serde(default)]
     pub n: Option<usize>,
     #[serde(default)]
     pub stream: bool,
@@ -60,11 +60,11 @@ pub enum StringOrArray {
     Array(Vec<String>),
 }
 
-impl StringOrArray {
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for StringOrArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StringOrArray::String(s) => s.clone(),
-            StringOrArray::Array(arr) => arr.join("\n"),
+            StringOrArray::String(s) => write!(f, "{}", s),
+            StringOrArray::Array(arr) => write!(f, "{}", arr.join("\n")),
         }
     }
 }
@@ -76,12 +76,4 @@ fn default_max_tokens() -> Option<usize> {
 
 fn default_temperature() -> Option<f32> {
     Some(0.7)
-}
-
-fn default_top_p() -> Option<f32> {
-    Some(1.0)
-}
-
-fn default_n() -> Option<usize> {
-    Some(1)
 }

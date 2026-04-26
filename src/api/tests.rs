@@ -346,3 +346,73 @@ async fn test_text_completion_nonexistent_model() {
         .unwrap()
         .contains("nonexistent-model"));
 }
+
+#[tokio::test]
+async fn test_chat_completion_streaming() {
+    let (app, _temp_dir) = create_test_app();
+    let request_body = json!({
+        "model": "test-model",
+        "messages": [
+            {"role": "user", "content": "Hello"}
+        ],
+        "max_tokens": 50,
+        "stream": true
+    });
+
+    let request = Request::builder()
+        .uri("/v1/chat/completions")
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&request_body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+
+    // Read the streaming body
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_text = String::from_utf8_lossy(&body_bytes);
+
+    // Parse SSE events (format: "data: {...}\n\n")
+    let events: Vec<&str> = body_text
+        .split("\n\n")
+        .filter(|line| line.starts_with("data: "))
+        .map(|line| line.strip_prefix("data: ").unwrap())
+        .collect();
+
+    assert!(!events.is_empty(), "Should have at least one event");
+
+    // Separate JSON events from [DONE]
+    let json_events: Vec<&str> = events.iter().filter(|&&e| e != "[DONE]").copied().collect();
+
+    assert!(
+        !json_events.is_empty(),
+        "Should have at least one JSON event"
+    );
+
+    // Check first event has role
+    let first_event: Value = serde_json::from_str(json_events[0]).unwrap();
+    assert_eq!(first_event["object"], "chat.completion.chunk");
+    assert_eq!(first_event["model"], "test-model");
+    assert_eq!(first_event["choices"][0]["delta"]["role"], "assistant");
+
+    // Check middle events have content
+    if json_events.len() > 2 {
+        let middle_event: Value = serde_json::from_str(json_events[1]).unwrap();
+        assert!(middle_event["choices"][0]["delta"]["content"].is_string());
+    }
+
+    // Check last JSON event has finish_reason
+    let last_json_event: Value = serde_json::from_str(json_events[json_events.len() - 1]).unwrap();
+    assert_eq!(last_json_event["choices"][0]["finish_reason"], "stop");
+
+    // Check stream ends with [DONE]
+    assert!(events.contains(&"[DONE]"), "Stream should end with [DONE]");
+}
