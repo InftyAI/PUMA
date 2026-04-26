@@ -141,12 +141,12 @@ pub async fn run(cli: Cli) {
                 "MODEL", "TASK", "PROVIDER", "REVISION", "SIZE", "CREATED"
             ]);
             for model in models {
-                let size_str = format_size_decimal(model.metadata.artifact.size);
+                let size_str = format_size_decimal(model.metadata.cache.size);
 
-                let revision_short = if model.metadata.artifact.revision.len() > 8 {
-                    &model.metadata.artifact.revision[..8]
+                let revision_short = if model.metadata.cache.revision.len() > 8 {
+                    &model.metadata.cache.revision[..8]
                 } else {
-                    &model.metadata.artifact.revision
+                    &model.metadata.cache.revision
                 };
 
                 let created_str = format_time_ago(&model.created_at);
@@ -230,7 +230,7 @@ pub async fn run(cli: Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata};
+    use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata};
     use tempfile::TempDir;
 
     // Helper to create a test model
@@ -245,15 +245,15 @@ mod tests {
         ModelInfo {
             uuid: revision.to_string(),
             name: name.to_string(),
+            provider: "huggingface".to_string(),
             author: Some("test-author".to_string()),
             task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
-            provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                artifact: ArtifactInfo {
+                cache: CacheInfo {
                     revision: revision.to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
@@ -375,7 +375,7 @@ mod tests {
 
         // Update the model
         let mut updated_model = create_test_model("test/updated-model", "v2");
-        updated_model.metadata.artifact.size = 2000;
+        updated_model.metadata.cache.size = 2000;
         updated_model.created_at = "2025-01-05T00:00:00Z".to_string();
         updated_model.updated_at = "2025-01-05T00:00:00Z".to_string();
 
@@ -387,7 +387,7 @@ mod tests {
         // updated_at should be new
         assert_eq!(result.updated_at, "2025-01-05T00:00:00Z");
         // Other fields should be updated
-        assert_eq!(result.metadata.artifact.revision, "v2");
-        assert_eq!(result.metadata.artifact.size, 2000);
+        assert_eq!(result.metadata.cache.revision, "v2");
+        assert_eq!(result.metadata.cache.size, 2000);
     }
 }

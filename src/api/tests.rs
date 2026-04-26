@@ -14,7 +14,7 @@ use tower::util::ServiceExt; // for `oneshot` and `ready`
 
 use super::routes::create_router;
 use crate::backend::mock::MockEngine;
-use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata, ModelRegistry};
+use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
 /// Returns the router and the temp directory (which must be kept alive)
@@ -27,15 +27,15 @@ fn create_test_app() -> (axum::Router, TempDir) {
     let test_model = ModelInfo {
         uuid: "test-uuid".to_string(),
         name: "test-model".to_string(),
+        provider: "test".to_string(),
         author: Some("test-author".to_string()),
         task: Some("text-generation".to_string()),
         model_series: Some("test-series".to_string()),
-        provider: "test".to_string(),
         license: Some("MIT".to_string()),
         created_at: chrono::Utc::now().to_rfc3339(),
         updated_at: chrono::Utc::now().to_rfc3339(),
         metadata: ModelMetadata {
-            artifact: ArtifactInfo {
+            cache: CacheInfo {
                 revision: "test-rev".to_string(),
                 size: 1000,
                 path: "/tmp/test-model".to_string(),

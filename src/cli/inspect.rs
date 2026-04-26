@@ -68,12 +68,12 @@ pub fn display(model: &ModelInfo) {
     // Artifact section
     println!("  artifact:");
     println!("    provider:       {}", model.provider);
-    println!("    revision:       {}", model.metadata.artifact.revision);
+    println!("    revision:       {}", model.metadata.cache.revision);
     println!(
         "    size:           {}",
-        format_size_decimal(model.metadata.artifact.size)
+        format_size_decimal(model.metadata.cache.size)
     );
-    println!("    cache_path:     {}", model.metadata.artifact.path);
+    println!("    cache_path:     {}", model.metadata.cache.path);
     println!("status:");
     println!("  created:        {}", format_time_ago(&model.created_at));
     println!("  updated:        {}", format_time_ago(&model.updated_at));
@@ -82,7 +82,7 @@ pub fn display(model: &ModelInfo) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::model_registry::{ArtifactInfo, ModelInfo, ModelMetadata};
+    use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata};
     use tempfile::TempDir;
 
     fn create_test_model(name: &str, uuid: &str) -> ModelInfo {
@@ -94,15 +94,15 @@ mod tests {
         ModelInfo {
             uuid: uuid.to_string(),
             name: name.to_string(),
+            provider: "huggingface".to_string(),
             author: Some("test-author".to_string()),
             task: Some("text-generation".to_string()),
             model_series: Some("gpt2".to_string()),
-            provider: "huggingface".to_string(),
             license: Some("mit".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             metadata: ModelMetadata {
-                artifact: ArtifactInfo {
+                cache: CacheInfo {
                     revision: uuid.to_string(),
                     size: 1000,
                     path: "/tmp/test".to_string(),
