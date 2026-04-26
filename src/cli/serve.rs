@@ -1,4 +1,4 @@
-use colored::Colorize;
+use log::{debug, info};
 use std::sync::Arc;
 
 use crate::api::create_router;
@@ -7,15 +7,28 @@ use crate::registry::model_registry::ModelRegistry;
 
 /// Execute the serve command
 pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{} Starting PUMA inference server...", "🚀".bright_green());
+    println!(
+        "
+ ███████████  █████  █████ ██████   ██████   █████████
+░░███░░░░░███░░███  ░░███ ░░██████ ██████   ███░░░░░███
+ ░███    ░███ ░███   ░███  ░███░█████░███  ░███    ░███
+ ░██████████  ░███   ░███  ░███░░███ ░███  ░███████████
+ ░███░░░░░░   ░███   ░███  ░███ ░░░  ░███  ░███░░░░░███
+ ░███         ░███   ░███  ░███      ░███  ░███    ░███
+ █████        ░░████████   █████     █████ █████   █████
+░░░░░          ░░░░░░░░   ░░░░░     ░░░░░ ░░░░░   ░░░░░
+                                                        "
+    );
+    info!("Starting PUMA inference server");
 
     // Initialize backend (MockEngine for now, replace with MLX later)
     let engine = Arc::new(MockEngine::new());
-    println!("{} Inference engine initialized", "✓".green());
+    info!("Inference engine initialized");
+    debug!("Using MockEngine backend");
 
     // Initialize model registry
     let registry = Arc::new(ModelRegistry::new(None));
-    println!("{} Model registry loaded", "✓".green());
+    info!("Model registry loaded");
 
     // Create router
     let app = create_router(engine, registry);
@@ -24,25 +37,18 @@ pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Er
     let addr = format!("{}:{}", host, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    println!();
-    println!("{}", "PUMA Inference Server".bright_cyan().bold());
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━".bright_black());
-    println!(
-        "  Listening on: {}",
-        format!("http://{}", addr).bright_white().underline()
-    );
-    println!();
-    println!("  Endpoints:");
-    println!("    {} /v1/chat/completions", "POST".bright_yellow());
-    println!("    {} /v1/completions", "POST".bright_yellow());
-    println!("    {} /v1/models", "GET ".bright_green());
-    println!("    {} /health", "GET ".bright_green());
-    println!();
-    println!("  {}", "Press Ctrl+C to stop".bright_black());
-    println!();
+    info!("Server listening on http://{}", addr);
+    info!("Available endpoints:");
+    info!("  POST /v1/chat/completions");
+    info!("  POST /v1/completions");
+    info!("  GET  /v1/models");
+    info!("  GET  /v1/models/:model");
+    info!("  GET  /health");
 
     // Start server
+    debug!("Starting axum server");
     axum::serve(listener, app).await?;
 
+    info!("Server shutdown");
     Ok(())
 }

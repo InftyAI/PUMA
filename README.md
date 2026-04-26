@@ -75,7 +75,7 @@ puma serve
 # Server will start on http://0.0.0.0:8000
 # API endpoints:
 #   POST /v1/chat/completions
-#   POST /v1/completions  
+#   POST /v1/completions
 #   GET  /v1/models
 #   GET  /health
 ```
