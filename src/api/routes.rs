@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::backend::InferenceEngine;
 use crate::registry::model_registry::ModelRegistry;
@@ -37,6 +37,8 @@ pub fn create_router<E: InferenceEngine + Clone + 'static>(
         .route("/health", get(health_check))
         // Pass state
         .with_state(state)
+        // Enable request/response logging
+        .layer(TraceLayer::new_for_http())
         // Enable CORS for browser clients
         .layer(CorsLayer::permissive())
 }

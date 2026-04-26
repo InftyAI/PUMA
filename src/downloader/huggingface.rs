@@ -1,5 +1,5 @@
 use colored::Colorize;
-use log::debug;
+use tracing::debug;
 
 use hf_hub::api::tokio::{ApiBuilder, Progress};
 use indicatif::{ProgressBar, ProgressStyle};

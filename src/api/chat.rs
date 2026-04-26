@@ -204,7 +204,7 @@ async fn chat_completions_stream<E: InferenceEngine + 'static>(
                 }
             }
             Err(e) => {
-                log::error!("Error generating stream: {}", e);
+                tracing::error!("Error generating stream: {}", e);
                 return;
             }
         }

@@ -1,6 +1,6 @@
 use colored::Colorize;
-use log::{debug, info};
 use std::sync::Arc;
+use tracing::{debug, info};
 
 use crate::api::routes::create_router;
 use crate::backend::mock::MockEngine;
