@@ -228,6 +228,7 @@ name: inftyai/tiny-random-gpt2
 kind: Model
 spec:
   author:         inftyai
+  provider:     huggingface
   task:           text-generation
   license:        MIT
   model_series:   gpt2
@@ -236,8 +237,7 @@ spec:
     total:        7.00B
     parameters:
       f32:        7.00B
-  artifact:
-    provider:     huggingface
+  cache:
     revision:     abc123de
     size:         1.24 GB
     cache_path:   ~/.puma/cache/...

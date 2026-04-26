@@ -81,10 +81,10 @@ impl ModelRegistry {
         let model_info = self.get_model(name)?;
 
         if let Some(info) = model_info {
-            // Delete artifact directory if it exists
-            let artifact_path = std::path::Path::new(&info.metadata.cache.path);
-            if artifact_path.exists() {
-                fs::remove_dir_all(artifact_path)?;
+            // Delete cache directory if it exists
+            let cache_path = std::path::Path::new(&info.metadata.cache.path);
+            if cache_path.exists() {
+                fs::remove_dir_all(cache_path)?;
             }
 
             // Remove from registry
