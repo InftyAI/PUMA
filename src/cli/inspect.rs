@@ -19,7 +19,6 @@ pub fn display(model: &ModelInfo) {
         "  author:         {}",
         model.author.as_deref().unwrap_or("N/A")
     );
-    println!("  provider:       {}", model.provider);
     println!(
         "  model_series:   {}",
         model.model_series.as_deref().unwrap_or("N/A")
@@ -66,6 +65,7 @@ pub fn display(model: &ModelInfo) {
         println!("  safetensors:    N/A");
     }
 
+    println!("  provider:       {}", model.provider);
     // Cache section
     println!("  cache:");
     println!("    revision:       {}", model.metadata.cache.revision);
