@@ -69,8 +69,8 @@ puma rm inftyai/tiny-random-gpt2
 ### API Server
 
 ```bash
-# Start the inference server
-puma serve
+# Start the inference server with a model
+puma serve inftyai/tiny-random-gpt2
 
 # Server will start on http://0.0.0.0:8000
 # API endpoints:
@@ -109,7 +109,7 @@ curl http://localhost:8000/v1/chat/completions \
 | `rm <model>` | ✅ | Remove model and cache |
 | `info` | ✅ | Display system information |
 | `version` | ✅ | Show PUMA version |
-| `serve` | ✅ | Start OpenAI-compatible API server |
+| `serve <model>` | ✅ | Start OpenAI-compatible API server with a model |
 | `ps` | 🚧 | List running models |
 | `run` | 🚧 | Start model inference |
 | `stop` | 🚧 | Stop running model |
@@ -151,11 +151,14 @@ PUMA provides an OpenAI-compatible API server for model inference.
 ### Starting the Server
 
 ```bash
-# Default: 0.0.0.0:8000
-puma serve
+# Start server with a model (default: 0.0.0.0:8000)
+puma serve inftyai/tiny-random-gpt2
 
 # Custom host and port
-puma serve --host 127.0.0.1 --port 3000
+puma serve inftyai/tiny-random-gpt2 --host 127.0.0.1 --port 3000
+
+# Model must be pulled first
+puma pull inftyai/tiny-random-gpt2
 ```
 
 ### API Endpoints
@@ -188,13 +191,14 @@ curl http://localhost:8000/v1/chat/completions \
 
 #### List Models
 ```bash
+# Returns the currently loaded model
 curl http://localhost:8000/v1/models
 ```
 
 #### Health Check
 ```bash
 curl http://localhost:8000/health
-# Returns: {"status":"ok","version":"0.0.2"}
+# Returns: {"status":"ok"}
 ```
 
 ### OpenAI Python Client

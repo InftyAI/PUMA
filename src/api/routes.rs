@@ -60,13 +60,11 @@ pub fn create_router<E: InferenceEngine + Clone + 'static>(
 #[derive(Serialize)]
 struct HealthResponse {
     status: String,
-    version: String,
 }
 
 /// Health check endpoint
 async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
