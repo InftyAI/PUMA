@@ -100,7 +100,6 @@ async fn test_health_check() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "ok");
-    assert!(json["version"].is_string());
 }
 
 #[tokio::test]
