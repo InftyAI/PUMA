@@ -43,6 +43,9 @@ enum Commands {
 
 #[derive(Parser)]
 struct ServeArgs {
+    /// Model name to serve (e.g., inftyai/tiny-random-gpt2)
+    model: String,
+
     /// Host address to bind to
     #[arg(long, default_value = "0.0.0.0")]
     host: String,
@@ -221,7 +224,24 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::SERVE(args) => {
-            if let Err(e) = crate::cli::serve::execute(&args.host, args.port).await {
+            // Verify model exists
+            let registry = ModelRegistry::new(None);
+            match registry.get_model(&args.model) {
+                Ok(Some(_)) => {
+                    // Model exists, proceed
+                }
+                Ok(None) => {
+                    eprintln!("❌ Error: Model '{}' not found in registry", args.model);
+                    eprintln!("Run 'puma pull {}' to download it first", args.model);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("❌ Error checking model: {}", e);
+                    std::process::exit(1);
+                }
+            }
+
+            if let Err(e) = crate::cli::serve::execute(&args.host, args.port, &args.model).await {
                 eprintln!("Error starting server: {}", e);
                 std::process::exit(1);
             }
@@ -391,5 +411,59 @@ mod tests {
         // Other fields should be updated
         assert_eq!(result.metadata.cache.revision, "v2");
         assert_eq!(result.metadata.cache.size, 2000);
+    }
+
+    #[test]
+    fn test_serve_with_existing_model() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        let model = create_test_model("test/serve-model", "abc123");
+        registry.register_model(model).unwrap();
+
+        // Verify model exists (this is what serve command checks)
+        let result = registry.get_model("test/serve-model");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_serve_with_nonexistent_model() {
+        let temp_dir = TempDir::new().unwrap();
+        let registry = ModelRegistry::new(Some(temp_dir.path().to_path_buf()));
+
+        // Verify model doesn't exist
+        let result = registry.get_model("nonexistent/model");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_serve_args_parsing() {
+        // Test that ServeArgs requires model argument
+        use clap::CommandFactory;
+        let app = Cli::command();
+
+        // This should fail without model argument
+        let result = app.clone().try_get_matches_from(vec!["puma", "serve"]);
+        assert!(result.is_err());
+
+        // This should succeed with model argument
+        let result = app
+            .clone()
+            .try_get_matches_from(vec!["puma", "serve", "test/model"]);
+        assert!(result.is_ok());
+
+        // This should succeed with model and optional args
+        let result = app.try_get_matches_from(vec![
+            "puma",
+            "serve",
+            "test/model",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "9000",
+        ]);
+        assert!(result.is_ok());
     }
 }

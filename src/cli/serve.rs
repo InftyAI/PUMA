@@ -7,7 +7,11 @@ use crate::backend::mock::MockEngine;
 use crate::registry::model_registry::ModelRegistry;
 
 /// Execute the serve command
-pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn execute(
+    host: &str,
+    port: u16,
+    model_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         "
@@ -23,7 +27,7 @@ pub async fn execute(host: &str, port: u16) -> Result<(), Box<dyn std::error::Er
         .bright_blue()
         .bold()
     );
-    info!("Starting PUMA inference server");
+    info!("Starting PUMA to serve model: {}", model_name);
 
     // Initialize backend (MockEngine for now, replace with MLX later)
     let engine = Arc::new(MockEngine::new());
