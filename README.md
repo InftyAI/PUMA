@@ -244,7 +244,7 @@ spec:
   cache:
     revision:     abc123de
     size:         1.24 GB
-    path:   ~/.puma/cache/...
+    path:         ~/.puma/cache/...
 status:
   created:      2 hours ago
   updated:      2 hours ago

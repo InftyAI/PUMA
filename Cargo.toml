@@ -4,6 +4,12 @@ version = "0.0.3"
 edition = "2021"
 description = "A lightweight, high-performance inference engine for local AI."
 license = "Apache-2.0"
+repository = "https://github.com/InftyAI/PUMA"
+homepage = "https://github.com/InftyAI/PUMA"
+documentation = "https://github.com/InftyAI/PUMA"
+readme = "README.md"
+keywords = ["inference", "llm", "local-ai"]
+authors = ["PUMA Team"]
 
 [dependencies]
 
