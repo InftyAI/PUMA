@@ -2,8 +2,8 @@ use clap::{Parser, Subcommand};
 use prettytable::{format, row, Table};
 
 use crate::cli::{inspect, ls, rm};
-use crate::downloader::downloader::Downloader;
 use crate::downloader::huggingface::HuggingFaceDownloader;
+use crate::downloader::Downloader;
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
 use crate::utils::format::{format_size_decimal, format_time_ago};

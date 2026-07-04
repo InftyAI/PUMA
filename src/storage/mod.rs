@@ -1,5 +1,5 @@
+pub mod model_storage;
 pub mod sqlite;
-pub mod storage_trait;
 
+pub use model_storage::ModelStorage;
 pub use sqlite::SqliteStorage;
-pub use storage_trait::ModelStorage;
