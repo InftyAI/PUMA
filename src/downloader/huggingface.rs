@@ -4,8 +4,8 @@ use tracing::debug;
 use hf_hub::api::tokio::{ApiBuilder, Progress};
 use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::downloader::downloader::{DownloadError, Downloader};
 use crate::downloader::progress::{DownloadProgressManager, FileProgress};
+use crate::downloader::{DownloadError, Downloader};
 use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 use crate::utils::file::{self, format_model_name};
 

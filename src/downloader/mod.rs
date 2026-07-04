@@ -1,4 +1,5 @@
-#[allow(clippy::module_inception)]
-pub mod downloader;
+pub mod download;
 pub mod huggingface;
 pub mod progress;
+
+pub use download::{DownloadError, Downloader};
