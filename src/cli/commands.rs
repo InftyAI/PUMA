@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use prettytable::{format, row, Table};
 
 use crate::cli::{inspect, ls, rm};
-use crate::downloader::huggingface::HuggingFaceDownloader;
-use crate::downloader::Downloader;
+use crate::downloader::{self, Provider};
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
 use crate::utils::format::{format_size_decimal, format_time_ago};
@@ -26,7 +26,7 @@ enum Commands {
     /// Download a model from a model provider
     PULL(PullArgs),
     /// Create and run a new model
-    RUN,
+    RUN(RunArgs),
     /// Stop one running model
     STOP,
     /// Remove one model
@@ -39,6 +39,22 @@ enum Commands {
     VERSION,
     /// Start the inference server
     SERVE(ServeArgs),
+}
+
+#[derive(Parser)]
+struct RunArgs {
+    /// Model name to run (e.g., inftyai/tiny-random-gpt2)
+    model: String,
+
+    /// Provider to download from if model not found
+    #[arg(
+        short = 'p',
+        long,
+        value_name = "model provider",
+        value_enum,
+        default_value = "huggingface"
+    )]
+    provider: Provider,
 }
 
 #[derive(Parser)]
@@ -89,15 +105,6 @@ struct RmArgs {
 struct InspectArgs {
     /// Model name to inspect (e.g., inftyai/tiny-random-gpt2)
     model: String,
-}
-
-#[derive(Debug, Clone, Default, clap::ValueEnum)]
-pub enum Provider {
-    #[default]
-    #[value(alias = "hf")]
-    Huggingface,
-    #[value(alias = "ms")]
-    Modelscope,
 }
 
 // Support commands like: pull, ls, run, ps, stop, rm, info, inspect, show.
@@ -171,22 +178,46 @@ pub async fn run(cli: Cli) {
             table.printstd();
         }
 
-        Commands::PULL(args) => match args.provider {
-            Provider::Huggingface => {
-                let downloader = HuggingFaceDownloader::new();
-                // Make sure to use lowercase for model name to ensure consistent caching and registry entries.
-                if let Err(e) = downloader.download_model(&args.model.to_lowercase()).await {
-                    eprintln!("❌ Error downloading model: {}", e);
+        Commands::PULL(args) => {
+            if let Err(e) = downloader::download_model(&args.model, args.provider).await {
+                eprintln!("❌ Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::RUN(args) => {
+            let registry = ModelRegistry::new(None);
+
+            // Check if model exists
+            match registry.get_model(&args.model) {
+                Ok(Some(_)) => {
+                    // Model exists, proceed
+                    println!("Running model: {}", args.model);
+                    // TODO: Implement actual model execution
+                    println!("Model execution not yet implemented");
+                }
+                Ok(None) => {
+                    // Model not found, download it first
+                    println!(
+                        "Model {} not found locally. Downloading...",
+                        args.model.cyan().bold()
+                    );
+
+                    if let Err(e) = downloader::download_model(&args.model, args.provider).await {
+                        eprintln!("❌ Error: {}", e);
+                        std::process::exit(1);
+                    }
+
+                    // Now run the model
+                    println!("Running model: {}", args.model.cyan().bold());
+                    // TODO: Implement actual model execution
+                    println!("Model execution not yet implemented");
+                }
+                Err(e) => {
+                    eprintln!("❌ Error checking model: {}", e);
                     std::process::exit(1);
                 }
             }
-            Provider::Modelscope => {
-                println!("Downloading model from Modelscope...");
-            }
-        },
-
-        Commands::RUN => {
-            println!("Creating and running a new model...");
         }
 
         Commands::STOP => {
@@ -464,6 +495,48 @@ mod tests {
             "--port",
             "9000",
         ]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_args_parsing() {
+        use clap::CommandFactory;
+        let app = Cli::command();
+
+        // This should fail without model argument
+        let result = app.clone().try_get_matches_from(vec!["puma", "run"]);
+        assert!(result.is_err());
+
+        // This should succeed with model argument (default provider)
+        let result = app
+            .clone()
+            .try_get_matches_from(vec!["puma", "run", "test/model"]);
+        assert!(result.is_ok());
+
+        // This should succeed with explicit huggingface provider
+        let result = app.clone().try_get_matches_from(vec![
+            "puma",
+            "run",
+            "test/model",
+            "-p",
+            "huggingface",
+        ]);
+        assert!(result.is_ok());
+
+        // This should succeed with hf alias
+        let result =
+            app.clone()
+                .try_get_matches_from(vec!["puma", "run", "test/model", "--provider", "hf"]);
+        assert!(result.is_ok());
+
+        // This should succeed with modelscope provider
+        let result =
+            app.clone()
+                .try_get_matches_from(vec!["puma", "run", "test/model", "-p", "modelscope"]);
+        assert!(result.is_ok());
+
+        // This should succeed with ms alias
+        let result = app.try_get_matches_from(vec!["puma", "run", "test/model", "-p", "ms"]);
         assert!(result.is_ok());
     }
 }

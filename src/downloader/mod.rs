@@ -29,3 +29,26 @@ impl fmt::Display for DownloadError {
 pub trait Downloader {
     async fn download_model(&self, name: &str) -> Result<(), DownloadError>;
 }
+
+/// Provider for downloading models
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum Provider {
+    #[default]
+    #[value(alias = "hf")]
+    Huggingface,
+    #[value(alias = "ms")]
+    Modelscope,
+}
+
+/// Download a model from the specified provider
+pub async fn download_model(model_name: &str, provider: Provider) -> Result<(), DownloadError> {
+    match provider {
+        Provider::Huggingface => {
+            let downloader = huggingface::HuggingFaceDownloader::new();
+            downloader.download_model(&model_name.to_lowercase()).await
+        }
+        Provider::Modelscope => Err(DownloadError::ApiError(
+            "Modelscope provider not yet implemented".to_string(),
+        )),
+    }
+}
