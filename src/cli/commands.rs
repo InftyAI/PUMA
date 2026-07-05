@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use prettytable::{format, row, Table};
 
 use crate::cli::{inspect, ls, rm};
@@ -106,7 +107,6 @@ struct InspectArgs {
     model: String,
 }
 
-
 // Support commands like: pull, ls, run, ps, stop, rm, info, inspect, show.
 pub async fn run(cli: Cli) {
     match cli.command {
@@ -198,7 +198,10 @@ pub async fn run(cli: Cli) {
                 }
                 Ok(None) => {
                     // Model not found, download it first
-                    println!("Model '{}' not found locally. Downloading...", args.model);
+                    println!(
+                        "Model {} not found locally. Downloading...",
+                        args.model.cyan().bold()
+                    );
 
                     if let Err(e) = downloader::download_model(&args.model, args.provider).await {
                         eprintln!("❌ Error: {}", e);
@@ -206,7 +209,7 @@ pub async fn run(cli: Cli) {
                     }
 
                     // Now run the model
-                    println!("Running model: {}", args.model);
+                    println!("Running model: {}", args.model.cyan().bold());
                     // TODO: Implement actual model execution
                     println!("Model execution not yet implemented");
                 }

@@ -47,10 +47,8 @@ pub async fn download_model(model_name: &str, provider: Provider) -> Result<(), 
             let downloader = huggingface::HuggingFaceDownloader::new();
             downloader.download_model(&model_name.to_lowercase()).await
         }
-        Provider::Modelscope => {
-            Err(DownloadError::ApiError(
-                "Modelscope provider not yet implemented".to_string(),
-            ))
-        }
+        Provider::Modelscope => Err(DownloadError::ApiError(
+            "Modelscope provider not yet implemented".to_string(),
+        )),
     }
 }
