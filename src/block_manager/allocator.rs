@@ -41,7 +41,10 @@ impl MemoryAllocator for CpuAllocator {
 
         self.used_memory += size_bytes;
 
-        Ok(MemoryAddress { ptr, size: size_bytes })
+        Ok(MemoryAddress {
+            ptr,
+            size: size_bytes,
+        })
     }
 
     fn free(&mut self, addr: MemoryAddress) -> Result<()> {

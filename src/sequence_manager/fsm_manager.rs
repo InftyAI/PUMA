@@ -1,8 +1,8 @@
+use super::events::*;
+use super::fsm_events::*;
+use super::states::*;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
-use super::events::*;
-use super::states::*;
-use super::fsm_events::*;
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info, warn};
 
@@ -94,12 +94,7 @@ impl SequenceManager {
         info!("FSM SequenceManager event loop stopped");
     }
 
-    fn handle_add_request(
-        &mut self,
-        seq_id: SequenceId,
-        prompt_tokens: usize,
-        max_tokens: usize,
-    ) {
+    fn handle_add_request(&mut self, seq_id: SequenceId, prompt_tokens: usize, max_tokens: usize) {
         debug!(
             "Adding request: seq_id={:?}, prompt_tokens={}, max_tokens={}",
             seq_id, prompt_tokens, max_tokens
@@ -281,7 +276,7 @@ impl SequenceManager {
                 Err(Error::OutOfMemory) => {
                     // Can't schedule - leave in waiting queue
                     // Put state back
-                    if let Some(old_state) = self.sequences.get(&seq_id) {
+                    if let Some(_old_state) = self.sequences.get(&seq_id) {
                         // State was already removed, this shouldn't happen
                         // but handle gracefully
                     }
@@ -312,17 +307,9 @@ impl SequenceManager {
     }
 
     fn get_stats(&self) -> SequenceManagerStats {
-        let num_running = self
-            .sequences
-            .values()
-            .filter(|s| s.is_running())
-            .count();
+        let num_running = self.sequences.values().filter(|s| s.is_running()).count();
 
-        let num_waiting = self
-            .sequences
-            .values()
-            .filter(|s| s.is_waiting())
-            .count();
+        let num_waiting = self.sequences.values().filter(|s| s.is_waiting()).count();
 
         let num_preempted = self
             .sequences

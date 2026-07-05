@@ -1,5 +1,5 @@
 use puma::block_manager::{BlockManager, CpuAllocator};
-use puma::sequence_manager::{SequenceManager, SequenceEvent, SequenceIdGenerator};
+use puma::sequence_manager::{SequenceEvent, SequenceIdGenerator, SequenceManager};
 
 #[tokio::main]
 async fn main() {
@@ -113,9 +113,7 @@ async fn main() {
         .send(SequenceEvent::CompleteSequence { seq_id })
         .unwrap();
     event_tx
-        .send(SequenceEvent::CompleteSequence {
-            seq_id: child_id,
-        })
+        .send(SequenceEvent::CompleteSequence { seq_id: child_id })
         .unwrap();
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

@@ -1,6 +1,6 @@
+use super::states::*;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
-use super::states::*;
 use tracing::{debug, warn};
 
 /// FSM Events - transform states with type-safe transitions
@@ -18,13 +18,14 @@ impl<'a> ScheduleEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
             SequenceState::Waiting(s) => self.from_waiting(s),
-            _ => Err(Error::invalid_transition("ScheduleEvent requires Waiting state")),
+            _ => Err(Error::invalid_transition(
+                "ScheduleEvent requires Waiting state",
+            )),
         }
     }
 
     fn from_waiting(self, state: WaitingState) -> Result<SequenceState> {
-        let blocks_needed =
-            (state.prompt_tokens + self.tokens_per_block - 1) / self.tokens_per_block;
+        let blocks_needed = state.prompt_tokens.div_ceil(self.tokens_per_block);
 
         let mut blocks = Vec::new();
         for _ in 0..blocks_needed {
@@ -49,7 +50,9 @@ impl<'a> ScheduleEvent<'a> {
 
         debug!(
             "Scheduled seq {:?}: allocated {} blocks for {} tokens",
-            state.seq_id, blocks.len(), state.prompt_tokens
+            state.seq_id,
+            blocks.len(),
+            state.prompt_tokens
         );
 
         Ok(SequenceState::Prefilling(PrefillingState {
@@ -74,7 +77,9 @@ impl<'a> AppendTokensEvent<'a> {
         match state {
             SequenceState::Prefilling(s) => self.from_prefilling(s),
             SequenceState::Decoding(s) => self.from_decoding(s),
-            _ => Err(Error::invalid_transition("AppendTokensEvent requires Prefilling or Decoding state")),
+            _ => Err(Error::invalid_transition(
+                "AppendTokensEvent requires Prefilling or Decoding state",
+            )),
         }
     }
 
@@ -122,7 +127,7 @@ impl<'a> AppendTokensEvent<'a> {
         }
 
         // Check if need more blocks
-        let blocks_needed = (state.num_tokens + self.tokens_per_block - 1) / self.tokens_per_block;
+        let blocks_needed = state.num_tokens.div_ceil(self.tokens_per_block);
 
         while state.blocks.len() < blocks_needed {
             match self.block_manager.allocate() {
@@ -156,7 +161,9 @@ impl<'a> PreemptEvent<'a> {
         match state {
             SequenceState::Decoding(s) => self.from_decoding(s),
             SequenceState::Prefilling(s) => self.from_prefilling(s),
-            _ => Err(Error::invalid_transition("PreemptEvent requires running state")),
+            _ => Err(Error::invalid_transition(
+                "PreemptEvent requires running state",
+            )),
         }
     }
 
@@ -198,7 +205,9 @@ impl ResumeEvent {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
             SequenceState::Preempted(s) => self.from_preempted(s),
-            _ => Err(Error::invalid_transition("ResumeEvent requires Preempted state")),
+            _ => Err(Error::invalid_transition(
+                "ResumeEvent requires Preempted state",
+            )),
         }
     }
 
@@ -221,20 +230,16 @@ pub struct ForkEvent<'a> {
 }
 
 impl<'a> ForkEvent<'a> {
-    pub fn apply(
-        self,
-        state: SequenceState,
-    ) -> Result<(SequenceState, SequenceState)> {
+    pub fn apply(self, state: SequenceState) -> Result<(SequenceState, SequenceState)> {
         match state {
             SequenceState::Decoding(s) => self.from_decoding(s),
-            _ => Err(Error::invalid_transition("ForkEvent requires Decoding state")),
+            _ => Err(Error::invalid_transition(
+                "ForkEvent requires Decoding state",
+            )),
         }
     }
 
-    fn from_decoding(
-        self,
-        state: DecodingState,
-    ) -> Result<(SequenceState, SequenceState)> {
+    fn from_decoding(self, state: DecodingState) -> Result<(SequenceState, SequenceState)> {
         // Copy-on-write: increment ref counts
         for &block_id in &state.blocks {
             self.block_manager.add_ref(block_id)?;
@@ -247,10 +252,7 @@ impl<'a> ForkEvent<'a> {
             max_tokens: state.max_tokens,
         };
 
-        debug!(
-            "Forked seq {:?} → {:?}",
-            state.seq_id, child.seq_id
-        );
+        debug!("Forked seq {:?} → {:?}", state.seq_id, child.seq_id);
 
         Ok((
             SequenceState::Decoding(state),
@@ -270,7 +272,9 @@ impl<'a> CompleteEvent<'a> {
         match state {
             SequenceState::Decoding(s) => self.from_decoding(s),
             SequenceState::Prefilling(s) => self.from_prefilling(s),
-            _ => Err(Error::invalid_transition("CompleteEvent requires running state")),
+            _ => Err(Error::invalid_transition(
+                "CompleteEvent requires running state",
+            )),
         }
     }
 
@@ -280,10 +284,7 @@ impl<'a> CompleteEvent<'a> {
             self.block_manager.free(block_id)?;
         }
 
-        debug!(
-            "Completed seq {:?}: {:?}",
-            state.seq_id, self.reason
-        );
+        debug!("Completed seq {:?}: {:?}", state.seq_id, self.reason);
 
         Ok(SequenceState::Finished(FinishedState {
             seq_id: state.seq_id,

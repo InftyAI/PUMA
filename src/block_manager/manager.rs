@@ -22,10 +22,7 @@ pub struct BlockManager {
 }
 
 impl BlockManager {
-    pub fn new(
-        allocator: Box<dyn MemoryAllocator>,
-        default_block_size: usize,
-    ) -> Self {
+    pub fn new(allocator: Box<dyn MemoryAllocator>, default_block_size: usize) -> Self {
         let mut manager = Self {
             allocator,
             block_table: HashMap::new(),
@@ -45,13 +42,14 @@ impl BlockManager {
     }
 
     pub fn register_block_type(&mut self, config: BlockConfig) {
-        self.free_pools.insert(config.block_type.clone(), Vec::new());
-        self.block_configs.insert(config.block_type.clone(), config);
+        self.free_pools.insert(config.block_type, Vec::new());
+        self.block_configs.insert(config.block_type, config);
     }
 
     pub fn allocate_typed(&mut self, block_type: &BlockType) -> Result<BlockId> {
         // Try free pool first
-        if let Some(block_id) = self.free_pools
+        if let Some(block_id) = self
+            .free_pools
             .get_mut(block_type)
             .and_then(|pool| pool.pop())
         {
@@ -61,30 +59,37 @@ impl BlockManager {
         }
 
         // Allocate new physical memory
-        let config = self.block_configs.get(block_type)
+        let config = self
+            .block_configs
+            .get(block_type)
             .ok_or_else(|| Error::UnknownBlockType(block_type.as_str().to_string()))?;
 
         let mem_addr = self.allocator.allocate(config.size_bytes)?;
 
         let block_id = BlockId(self.next_block_id.fetch_add(1, Ordering::Relaxed));
 
-        self.block_table.insert(block_id, Block {
+        self.block_table.insert(
             block_id,
-            block_type: block_type.clone(),
-            mem_addr,
-            ref_count: 1,
-        });
+            Block {
+                block_id,
+                block_type: *block_type,
+                mem_addr,
+                ref_count: 1,
+            },
+        );
 
         Ok(block_id)
     }
 
     pub fn allocate(&mut self) -> Result<BlockId> {
-        let default_type = self.default_block_type.clone();
+        let default_type = self.default_block_type;
         self.allocate_typed(&default_type)
     }
 
     pub fn free(&mut self, block_id: BlockId) -> Result<()> {
-        let block = self.block_table.get_mut(&block_id)
+        let block = self
+            .block_table
+            .get_mut(&block_id)
             .ok_or(Error::InvalidBlockId(block_id))?;
 
         if block.ref_count == 0 {
@@ -104,20 +109,24 @@ impl BlockManager {
     }
 
     pub fn add_ref(&mut self, block_id: BlockId) -> Result<()> {
-        let block = self.block_table.get_mut(&block_id)
+        let block = self
+            .block_table
+            .get_mut(&block_id)
             .ok_or(Error::InvalidBlockId(block_id))?;
         block.ref_count += 1;
         Ok(())
     }
 
     pub fn get_memory_address(&self, block_id: BlockId) -> Result<MemoryAddress> {
-        self.block_table.get(&block_id)
+        self.block_table
+            .get(&block_id)
             .map(|b| b.mem_addr)
             .ok_or(Error::InvalidBlockId(block_id))
     }
 
     pub fn get_block_type(&self, block_id: BlockId) -> Result<&BlockType> {
-        self.block_table.get(&block_id)
+        self.block_table
+            .get(&block_id)
             .map(|b| &b.block_type)
             .ok_or(Error::InvalidBlockId(block_id))
     }
@@ -129,17 +138,22 @@ impl BlockManager {
             let config = &self.block_configs[type_id];
             let free_count = pool.len();
 
-            let allocated_count = self.block_table.values()
+            let allocated_count = self
+                .block_table
+                .values()
                 .filter(|b| b.block_type == *type_id && b.ref_count > 0)
                 .count();
 
-            stats.insert(type_id.clone(), BlockStats {
-                total_blocks: free_count + allocated_count,
-                allocated_blocks: allocated_count,
-                free_blocks: free_count,
-                block_size: config.size_bytes,
-                total_memory: (free_count + allocated_count) * config.size_bytes,
-            });
+            stats.insert(
+                *type_id,
+                BlockStats {
+                    total_blocks: free_count + allocated_count,
+                    allocated_blocks: allocated_count,
+                    free_blocks: free_count,
+                    block_size: config.size_bytes,
+                    total_memory: (free_count + allocated_count) * config.size_bytes,
+                },
+            );
         }
 
         stats
