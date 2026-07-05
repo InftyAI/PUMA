@@ -122,6 +122,7 @@ impl SequenceManager {
             }
         };
 
+        let backup = state.clone();
         let event = AppendTokensEvent {
             num_tokens,
             block_manager: &mut self.block_manager,
@@ -134,10 +135,12 @@ impl SequenceManager {
             }
             Err(Error::OutOfMemory) => {
                 warn!("OOM while appending tokens to {:?}", seq_id);
+                self.sequences.insert(seq_id, backup);
                 self.handle_oom();
             }
             Err(e) => {
                 warn!("Failed to append tokens to {:?}: {:?}", seq_id, e);
+                self.sequences.insert(seq_id, backup);
             }
         }
     }
@@ -151,6 +154,7 @@ impl SequenceManager {
             }
         };
 
+        let backup = parent_state.clone();
         let event = ForkEvent {
             child_id,
             block_manager: &mut self.block_manager,
@@ -164,6 +168,7 @@ impl SequenceManager {
             }
             Err(e) => {
                 warn!("Failed to fork {:?}: {:?}", parent_id, e);
+                self.sequences.insert(parent_id, backup);
             }
         }
     }
@@ -177,6 +182,7 @@ impl SequenceManager {
             }
         };
 
+        let backup = state.clone();
         let event = CompleteEvent {
             reason: FinishReason::Stop,
             block_manager: &mut self.block_manager,
@@ -193,6 +199,7 @@ impl SequenceManager {
             }
             Err(e) => {
                 warn!("Failed to complete {:?}: {:?}", seq_id, e);
+                self.sequences.insert(seq_id, backup);
             }
         }
     }
@@ -206,6 +213,7 @@ impl SequenceManager {
             }
         };
 
+        let backup = state.clone();
         let event = PreemptEvent {
             block_manager: &mut self.block_manager,
         };
@@ -217,6 +225,7 @@ impl SequenceManager {
             }
             Err(e) => {
                 warn!("Failed to preempt {:?}: {:?}", seq_id, e);
+                self.sequences.insert(seq_id, backup);
             }
         }
     }
@@ -230,6 +239,7 @@ impl SequenceManager {
             }
         };
 
+        let backup = state.clone();
         let event = ResumeEvent;
 
         match event.apply(state) {
@@ -241,6 +251,7 @@ impl SequenceManager {
             }
             Err(e) => {
                 warn!("Failed to resume {:?}: {:?}", seq_id, e);
+                self.sequences.insert(seq_id, backup);
             }
         }
     }
@@ -262,6 +273,7 @@ impl SequenceManager {
                 continue;
             }
 
+            let backup = state.clone();
             let event = ScheduleEvent {
                 block_manager: &mut self.block_manager,
                 tokens_per_block: self.tokens_per_block,
@@ -274,16 +286,13 @@ impl SequenceManager {
                     info!("Scheduled sequence {:?}", seq_id);
                 }
                 Err(Error::OutOfMemory) => {
-                    // Can't schedule - leave in waiting queue
-                    // Put state back
-                    if let Some(_old_state) = self.sequences.get(&seq_id) {
-                        // State was already removed, this shouldn't happen
-                        // but handle gracefully
-                    }
+                    // Can't schedule - restore state and leave in waiting queue
+                    self.sequences.insert(seq_id, backup);
                     break;
                 }
                 Err(e) => {
                     warn!("Failed to schedule {:?}: {:?}", seq_id, e);
+                    self.sequences.insert(seq_id, backup);
                     self.waiting_queue.pop_front();
                 }
             }

@@ -11,10 +11,12 @@ Each sequence is an independent state machine:
 ```rust
 pub enum SequenceState {
     Waiting(WaitingState),
+    Scheduling(SchedulingState),
     Prefilling(PrefillingState),
     Decoding(DecodingState),
     Preempted(PreemptedState),
     Finished(FinishedState),
+    Aborted(AbortedState),
 }
 
 // Multiple sequences, different states
@@ -244,6 +246,9 @@ impl SequenceManager {
                 SequenceEvent::AppendTokens { seq_id, num_tokens } => {
                     // Get current state
                     let state = self.sequences.remove(&seq_id).unwrap();
+                    
+                    // Clone state before transition (prevents loss on failure)
+                    let backup = state.clone();
 
                     // Apply event transformation
                     let event = AppendTokensEvent {
@@ -259,6 +264,8 @@ impl SequenceManager {
                         }
                         Err(e) => {
                             error!("Transition failed: {:?}", e);
+                            // Restore original state to prevent sequence loss
+                            self.sequences.insert(seq_id, backup);
                         }
                     }
                 }
@@ -364,29 +371,68 @@ let state = event.apply(parent)?;
 | Manual cleanup | Automatic cleanup |
 | Runtime checks | Type + runtime checks |
 
+## Error Handling and State Recovery
+
+On transition failure, the state is cloned before applying the event:
+
+```rust
+fn handle_append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
+    let state = self.sequences.remove(&seq_id).unwrap();
+    let backup = state.clone();  // Clone before transition
+    
+    let event = AppendTokensEvent { ... };
+    
+    match event.apply(state) {
+        Ok(new_state) => {
+            self.sequences.insert(seq_id, new_state);
+        }
+        Err(Error::OutOfMemory) => {
+            // Restore state and trigger preemption
+            self.sequences.insert(seq_id, backup);
+            self.handle_oom();
+        }
+        Err(e) => {
+            // Restore state on any error (prevents block leaks)
+            self.sequences.insert(seq_id, backup);
+            warn!("Transition failed: {:?}", e);
+        }
+    }
+}
+```
+
+**Benefits:**
+- No sequence loss on transition failure
+- No block leaks (blocks remain owned by restored state)
+- Can retry or handle errors without losing context
+- Clone cost is negligible (~50-100 bytes per state)
+
 ## Usage
 
 ```rust
 use puma::block_manager::{BlockManager, CpuAllocator};
-use puma::sequence_manager::{FSMSequenceManager, SequenceEvent, SequenceId};
+use puma::sequence_manager::{SequenceManager, SequenceEvent, SequenceIdGenerator};
 
 // Setup
 let allocator = Box::new(CpuAllocator::new(100_000_000));
 let block_manager = BlockManager::new(allocator, 4096);
-let (fsm_manager, event_tx) = FSMSequenceManager::new(block_manager, 16);
+let (seq_manager, event_tx) = SequenceManager::new(block_manager, 16);
+
+// ID generator for sequential IDs starting from 0
+let id_gen = SequenceIdGenerator::new();
+let seq_id = id_gen.next();  // SequenceId(0)
 
 // Run event loop
-tokio::spawn(async move { fsm_manager.run().await });
+tokio::spawn(async move { seq_manager.run().await });
 
 // Send events
 event_tx.send(SequenceEvent::AddRequest {
-    seq_id: SequenceId(1),
+    seq_id,
     prompt_tokens: 100,
     max_tokens: 150,
 }).unwrap();
 
 event_tx.send(SequenceEvent::AppendTokens {
-    seq_id: SequenceId(1),
+    seq_id,
     num_tokens: 100,
 }).unwrap();
 ```

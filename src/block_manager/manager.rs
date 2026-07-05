@@ -173,3 +173,17 @@ impl BlockManager {
         false
     }
 }
+
+impl Drop for BlockManager {
+    fn drop(&mut self) {
+        // Free all backing memory allocations to prevent leaks
+        for block in self.block_table.values() {
+            if let Err(e) = self.allocator.free(block.mem_addr) {
+                eprintln!(
+                    "Warning: failed to free block {:?} memory: {:?}",
+                    block.block_id, e
+                );
+            }
+        }
+    }
+}

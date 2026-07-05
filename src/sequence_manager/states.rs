@@ -7,7 +7,7 @@ use crate::block_manager::types::*;
 ///                            ↓           ↓
 ///                            └→ Preempted ←┘
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SequenceState {
     /// Waiting in queue for scheduling
     Waiting(WaitingState),
@@ -32,7 +32,7 @@ pub enum SequenceState {
 }
 
 /// Waiting state - no resources allocated yet
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WaitingState {
     pub seq_id: SequenceId,
     pub prompt_tokens: usize,
@@ -40,7 +40,7 @@ pub struct WaitingState {
 }
 
 /// Scheduling state - in process of allocating blocks
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SchedulingState {
     pub seq_id: SequenceId,
     pub prompt_tokens: usize,
@@ -50,7 +50,7 @@ pub struct SchedulingState {
 }
 
 /// Prefilling state - processing prompt
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PrefillingState {
     pub seq_id: SequenceId,
     pub blocks: Vec<BlockId>,
@@ -60,7 +60,7 @@ pub struct PrefillingState {
 }
 
 /// Decoding state - generating tokens
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DecodingState {
     pub seq_id: SequenceId,
     pub blocks: Vec<BlockId>,
@@ -69,7 +69,7 @@ pub struct DecodingState {
 }
 
 /// Preempted state - blocks freed, waiting to resume
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PreemptedState {
     pub seq_id: SequenceId,
     pub num_tokens: usize,
@@ -78,14 +78,14 @@ pub struct PreemptedState {
 }
 
 /// Finished state - all resources freed
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FinishedState {
     pub seq_id: SequenceId,
     pub finish_reason: FinishReason,
 }
 
 /// Aborted state - error or cancellation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AbortedState {
     pub seq_id: SequenceId,
     pub reason: String,
