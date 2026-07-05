@@ -1,8 +1,10 @@
 mod api;
 mod backend;
+mod block_manager;
 mod cli;
 mod downloader;
 mod registry;
+mod sequence_manager;
 mod storage;
 mod system;
 mod utils;
