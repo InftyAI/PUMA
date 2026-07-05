@@ -497,4 +497,46 @@ mod tests {
         ]);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_run_args_parsing() {
+        use clap::CommandFactory;
+        let app = Cli::command();
+
+        // This should fail without model argument
+        let result = app.clone().try_get_matches_from(vec!["puma", "run"]);
+        assert!(result.is_err());
+
+        // This should succeed with model argument (default provider)
+        let result = app
+            .clone()
+            .try_get_matches_from(vec!["puma", "run", "test/model"]);
+        assert!(result.is_ok());
+
+        // This should succeed with explicit huggingface provider
+        let result = app.clone().try_get_matches_from(vec![
+            "puma",
+            "run",
+            "test/model",
+            "-p",
+            "huggingface",
+        ]);
+        assert!(result.is_ok());
+
+        // This should succeed with hf alias
+        let result =
+            app.clone()
+                .try_get_matches_from(vec!["puma", "run", "test/model", "--provider", "hf"]);
+        assert!(result.is_ok());
+
+        // This should succeed with modelscope provider
+        let result =
+            app.clone()
+                .try_get_matches_from(vec!["puma", "run", "test/model", "-p", "modelscope"]);
+        assert!(result.is_ok());
+
+        // This should succeed with ms alias
+        let result = app.try_get_matches_from(vec!["puma", "run", "test/model", "-p", "ms"]);
+        assert!(result.is_ok());
+    }
 }
