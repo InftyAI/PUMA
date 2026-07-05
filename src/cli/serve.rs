@@ -54,7 +54,7 @@ pub async fn execute(
     info!("  GET  /health");
 
     // Start server
-    debug!("Starting axum server");
+    debug!("Starting server");
     axum::serve(listener, app).await?;
 
     info!("Server shutdown");
