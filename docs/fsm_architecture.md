@@ -246,7 +246,7 @@ impl SequenceManager {
                 SequenceEvent::AppendTokens { seq_id, num_tokens } => {
                     // Get current state
                     let state = self.sequences.remove(&seq_id).unwrap();
-                    
+
                     // Clone state before transition (prevents loss on failure)
                     let backup = state.clone();
 
@@ -379,9 +379,9 @@ On transition failure, the state is cloned before applying the event:
 fn handle_append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
     let state = self.sequences.remove(&seq_id).unwrap();
     let backup = state.clone();  // Clone before transition
-    
+
     let event = AppendTokensEvent { ... };
-    
+
     match event.apply(state) {
         Ok(new_state) => {
             self.sequences.insert(seq_id, new_state);
@@ -436,5 +436,3 @@ event_tx.send(SequenceEvent::AppendTokens {
     num_tokens: 100,
 }).unwrap();
 ```
-
-See `examples/fsm_usage.rs` for complete example.
