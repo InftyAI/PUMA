@@ -94,6 +94,9 @@ pub enum Error {
 
     #[error("Allocation error: {0}")]
     AllocationError(String),
+
+    #[error("Free error: {0}")]
+    FreeError(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
