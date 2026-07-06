@@ -2,7 +2,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use prettytable::{format, row, Table};
 
-use crate::cli::{inspect, ls, rm};
+use crate::backend::mock::MockEngine;
+use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
@@ -188,16 +189,9 @@ pub async fn run(cli: Cli) {
         Commands::RUN(args) => {
             let registry = ModelRegistry::new(None);
 
-            // Check if model exists
+            // Ensure model exists locally, download if needed
             match registry.get_model(&args.model) {
-                Ok(Some(_)) => {
-                    // Model exists, proceed
-                    println!("Running model: {}", args.model);
-                    // TODO: Implement actual model execution
-                    println!("Model execution not yet implemented");
-                }
                 Ok(None) => {
-                    // Model not found, download it first
                     println!(
                         "Model {} not found locally. Downloading...",
                         args.model.cyan().bold()
@@ -207,16 +201,24 @@ pub async fn run(cli: Cli) {
                         eprintln!("❌ Error: {}", e);
                         std::process::exit(1);
                     }
-
-                    // Now run the model
-                    println!("Running model: {}", args.model.cyan().bold());
-                    // TODO: Implement actual model execution
-                    println!("Model execution not yet implemented");
                 }
                 Err(e) => {
                     eprintln!("❌ Error checking model: {}", e);
                     std::process::exit(1);
                 }
+                Ok(Some(_)) => {}
+            }
+
+            // Load inference engine with the model
+            // TODO: Replace MockEngine with real engine that loads model files
+            // Real engine will use: registry.get_model(&args.model)?.metadata.cache.path
+            let engine = MockEngine::new();
+
+            // Start interactive chat (no instruction message, just start prompting)
+
+            if let Err(e) = chat::interactive_chat(&engine, &args.model).await {
+                eprintln!("❌ Chat error: {}", e);
+                std::process::exit(1);
             }
         }
 
