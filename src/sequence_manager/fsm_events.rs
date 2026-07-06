@@ -1,3 +1,4 @@
+
 use super::states::*;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
@@ -112,7 +113,12 @@ impl<'a> AppendTokensEvent<'a> {
         if state.num_tokens >= state.max_tokens {
             // Free blocks
             for block_id in state.blocks {
-                self.block_manager.free(block_id)?;
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, state.seq_id, e
+                    );
+                }
             }
 
             debug!(
@@ -174,7 +180,12 @@ impl<'a> PreemptEvent<'a> {
     fn from_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
-            self.block_manager.free(block_id)?;
+            if let Err(e) = self.block_manager.free(block_id) {
+                warn!(
+                    "Failed to free block {:?} for {:?}: {:?}",
+                    block_id, state.seq_id, e
+                );
+            }
         }
 
         debug!("Preempted seq {:?}", state.seq_id);
@@ -187,9 +198,14 @@ impl<'a> PreemptEvent<'a> {
     }
 
     fn from_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
-        // Free all blocks
+        // Free all blocks (best effort)
         for block_id in state.blocks {
-            self.block_manager.free(block_id)?;
+            if let Err(e) = self.block_manager.free(block_id) {
+                warn!(
+                    "Failed to free block {:?} for {:?}: {:?}",
+                    block_id, state.seq_id, e
+                );
+            }
         }
 
         debug!("Preempted seq {:?} during prefill", state.seq_id);
@@ -285,7 +301,12 @@ impl<'a> CompleteEvent<'a> {
     fn from_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
-            self.block_manager.free(block_id)?;
+            if let Err(e) = self.block_manager.free(block_id) {
+                warn!(
+                    "Failed to free block {:?} for {:?}: {:?}",
+                    block_id, state.seq_id, e
+                );
+            }
         }
 
         debug!("Completed seq {:?}: {:?}", state.seq_id, self.reason);
@@ -299,7 +320,12 @@ impl<'a> CompleteEvent<'a> {
     fn from_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
-            self.block_manager.free(block_id)?;
+            if let Err(e) = self.block_manager.free(block_id) {
+                warn!(
+                    "Failed to free block {:?} for {:?}: {:?}",
+                    block_id, state.seq_id, e
+                );
+            }
         }
 
         debug!(
@@ -328,7 +354,12 @@ impl<'a> AbortEvent<'a> {
         // Free blocks if any
         if let Some(blocks) = state.blocks() {
             for &block_id in blocks {
-                self.block_manager.free(block_id)?;
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, seq_id, e
+                    );
+                }
             }
         }
 

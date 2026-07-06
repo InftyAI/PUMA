@@ -17,7 +17,6 @@ pub struct SequenceManager {
 
     // Event-driven
     event_rx: SequenceEventReceiver,
-    event_tx: SequenceEventSender,
 
     // Scheduling queues
     waiting_queue: VecDeque<SequenceId>,
@@ -36,7 +35,6 @@ impl SequenceManager {
             sequences: HashMap::new(),
             tokens_per_block,
             event_rx,
-            event_tx: event_tx.clone(),
             waiting_queue: VecDeque::new(),
         };
 
