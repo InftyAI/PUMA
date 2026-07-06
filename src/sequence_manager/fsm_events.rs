@@ -128,6 +128,7 @@ impl<'a> AppendTokensEvent<'a> {
 
         // Check if need more blocks
         let blocks_needed = state.num_tokens.div_ceil(self.tokens_per_block);
+        let initial_block_count = state.blocks.len();
 
         while state.blocks.len() < blocks_needed {
             match self.block_manager.allocate() {
@@ -139,11 +140,14 @@ impl<'a> AppendTokensEvent<'a> {
                         state.blocks.len()
                     );
                 }
-                Err(Error::OutOfMemory) => {
-                    warn!("OOM while appending tokens to {:?}", state.seq_id);
-                    return Err(Error::OutOfMemory);
+                Err(e) => {
+                    // Free any blocks we allocated in this call
+                    warn!("Failed to allocate block for {:?}: {:?}", state.seq_id, e);
+                    for block_id in state.blocks.drain(initial_block_count..) {
+                        let _ = self.block_manager.free(block_id);
+                    }
+                    return Err(e);
                 }
-                Err(e) => return Err(e),
             }
         }
 

@@ -91,7 +91,7 @@ pub struct AbortedState {
     pub reason: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FinishReason {
     /// Reached max_tokens limit
     MaxTokens,

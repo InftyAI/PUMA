@@ -4,4 +4,7 @@ pub mod fsm_manager;
 pub mod id_generator;
 pub mod states;
 
-// Re-export from block_manager for convenience
+#[cfg(test)]
+mod fsm_tests;
+
+// Re-export public API for convenience

@@ -2,7 +2,7 @@
 name = "puma"
 version = "0.0.3"
 edition = "2021"
-description = "A lightweight, high-performance inference engine for local AI."
+description = "A lightweight, high-performance model engine for local AI."
 license = "Apache-2.0"
 repository = "https://github.com/InftyAI/PUMA"
 homepage = "https://github.com/InftyAI/PUMA"

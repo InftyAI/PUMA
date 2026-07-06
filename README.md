@@ -6,7 +6,7 @@
   <img alt="PUMA Logo" src="https://raw.githubusercontent.com/InftyAI/PUMA/main/site/images/logo-light.svg" width="240">
 </picture>
 
-**A lightweight, high-performance inference engine for local AI**
+**A lightweight, high-performance model engine for local AI**
 
 [![Stability: Active](https://img.shields.io/badge/stability-active-brightgreen.svg)](https://github.com/InftyAI/PUMA)
 [![Latest Release](https://img.shields.io/github/v/release/InftyAI/PUMA)](https://github.com/InftyAI/PUMA/releases)
