@@ -27,7 +27,10 @@ impl fmt::Display for DownloadError {
 }
 
 pub trait Downloader {
-    async fn download_model(&self, name: &str) -> Result<(), DownloadError>;
+    fn download_model(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), DownloadError>> + Send;
 }
 
 /// Provider for downloading models
