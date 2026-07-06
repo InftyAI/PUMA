@@ -68,7 +68,6 @@ pub async fn interactive_chat<E: InferenceEngine>(
         let input = match readline {
             Ok(line) => line.trim().to_string(),
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
-                println!("\nGoodbye!");
                 break;
             }
             Err(err) => {
@@ -81,7 +80,6 @@ pub async fn interactive_chat<E: InferenceEngine>(
             continue;
         }
         if input == "exit" {
-            println!("Goodbye!");
             break;
         }
 
@@ -90,6 +88,9 @@ pub async fn interactive_chat<E: InferenceEngine>(
 
         // Build prompt from conversation history
         let prompt = conversation_history.join("\n") + "\nAssistant:";
+
+        // Empty line before response
+        println!();
 
         // Generate response with streaming
         match engine.generate_stream(model, &prompt, 512, 0.7).await {
