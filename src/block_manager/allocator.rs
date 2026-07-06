@@ -48,6 +48,12 @@ impl MemoryAllocator for CpuAllocator {
     }
 
     fn free(&mut self, addr: MemoryAddress) -> Result<()> {
+        if addr.size > self.used_memory {
+            return Err(Error::FreeError(
+                "free() called with size larger than used_memory".to_string(),
+            ));
+        }
+
         let layout = std::alloc::Layout::from_size_align(addr.size, 64)
             .map_err(|e| Error::FreeError(e.to_string()))?;
 
@@ -55,11 +61,6 @@ impl MemoryAllocator for CpuAllocator {
             std::alloc::dealloc(addr.ptr, layout);
         }
 
-        if addr.size > self.used_memory {
-            return Err(Error::FreeError(
-                "free() called with size larger than used_memory".to_string(),
-            ));
-        }
         self.used_memory -= addr.size;
 
         Ok(())

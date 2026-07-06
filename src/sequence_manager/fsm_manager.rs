@@ -28,8 +28,9 @@ impl SequenceManager {
         block_manager: BlockManager,
         tokens_per_block: usize,
     ) -> (Self, SequenceEventSender) {
-        let (event_tx, event_rx) = create_event_channel();
+        assert!(tokens_per_block > 0, "tokens_per_block must be > 0");
 
+        let (event_tx, event_rx) = create_event_channel();
         let manager = Self {
             block_manager,
             sequences: HashMap::new(),
@@ -308,11 +309,10 @@ impl SequenceManager {
     }
 
     fn get_blocks(&self, seq_id: SequenceId) -> Result<Vec<BlockId>> {
-        self.sequences
-            .get(&seq_id)
-            .and_then(|state| state.blocks())
-            .map(|blocks| blocks.to_vec())
-            .ok_or(Error::UnknownSequence(seq_id))
+        match self.sequences.get(&seq_id) {
+            None => Err(Error::UnknownSequence(seq_id)),
+            Some(state) => Ok(state.blocks().map(|b| b.to_vec()).unwrap_or_default()),
+        }
     }
 
     fn get_stats(&self) -> SequenceManagerStats {

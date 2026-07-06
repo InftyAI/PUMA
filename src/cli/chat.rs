@@ -54,7 +54,8 @@ pub async fn interactive_chat<E: InferenceEngine>(
     let helper = PlaceholderHinter {
         placeholder: "Send a message (Ctrl-C or 'exit' to quit)".to_string(),
     };
-    let mut rl = Editor::new().map_err(io::Error::other)?;
+    let mut rl = Editor::<PlaceholderHinter, rustyline::history::DefaultHistory>::new()
+        .map_err(io::Error::other)?;
     rl.set_helper(Some(helper));
 
     loop {
