@@ -31,7 +31,7 @@ impl MemoryAllocator for CpuAllocator {
 
         // Allocate aligned memory
         let layout = std::alloc::Layout::from_size_align(size_bytes, 64)
-            .map_err(|e| Error::AllocationError(e.to_string()))?;
+            .map_err(|e| Error::AllocationFailed(e.to_string()))?;
 
         let ptr = unsafe { std::alloc::alloc(layout) };
 
@@ -49,13 +49,13 @@ impl MemoryAllocator for CpuAllocator {
 
     fn free(&mut self, addr: MemoryAddress) -> Result<()> {
         if addr.size > self.used_memory {
-            return Err(Error::FreeError(
+            return Err(Error::FreeFailed(
                 "free() called with size larger than used_memory".to_string(),
             ));
         }
 
         let layout = std::alloc::Layout::from_size_align(addr.size, 64)
-            .map_err(|e| Error::FreeError(e.to_string()))?;
+            .map_err(|e| Error::FreeFailed(e.to_string()))?;
 
         unsafe {
             std::alloc::dealloc(addr.ptr, layout);

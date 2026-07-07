@@ -7,7 +7,6 @@ use tracing::{debug, warn};
 ///
 /// Pattern: Event takes old state, returns new state
 /// Invalid transitions return Error::invalid_transition
-
 /// Schedule a waiting sequence (allocate blocks)
 pub struct ScheduleEvent<'a> {
     pub block_manager: &'a mut BlockManager,
@@ -374,6 +373,6 @@ impl<'a> AbortEvent<'a> {
 /// Invalid transition error helper
 impl Error {
     pub fn invalid_transition(msg: &'static str) -> Self {
-        Error::AllocationError(format!("Invalid state transition: {}", msg))
+        Error::AllocationFailed(format!("Invalid state transition: {}", msg))
     }
 }

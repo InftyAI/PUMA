@@ -92,11 +92,11 @@ pub enum Error {
     #[error("Out of memory")]
     OutOfMemory,
 
-    #[error("Allocation error: {0}")]
-    AllocationError(String),
+    #[error("Allocation failed: {0}")]
+    AllocationFailed(String),
 
-    #[error("Free error: {0}")]
-    FreeError(String),
+    #[error("Free failed: {0}")]
+    FreeFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
