@@ -99,6 +99,15 @@ impl SequenceManager {
             seq_id, prompt_tokens, max_tokens
         );
 
+        // Check for duplicate seq_id
+        if self.sequences.contains_key(&seq_id) {
+            warn!(
+                "Duplicate AddRequest for {:?} - sequence already exists, ignoring",
+                seq_id
+            );
+            return;
+        }
+
         let state = SequenceState::Waiting(WaitingState {
             seq_id,
             prompt_tokens,
@@ -340,5 +349,70 @@ impl SequenceManager {
             num_preempted,
             block_stats: self.block_manager.get_stats(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block_manager::allocator::CpuAllocator;
+
+    fn create_test_manager() -> (SequenceManager, SequenceEventSender) {
+        let allocator = Box::new(CpuAllocator::new(1024 * 1024)); // 1MB
+        let block_manager = BlockManager::new(allocator, 256); // 256 byte blocks
+        SequenceManager::new(block_manager, 16) // 16 tokens per block
+    }
+
+    #[test]
+    fn test_duplicate_add_request_ignored() {
+        let (mut manager, _tx) = create_test_manager();
+
+        let seq_id = SequenceId(0);
+
+        // Add first request
+        manager.handle_add_request(seq_id, 32, 128);
+
+        // Verify it was added
+        assert!(manager.sequences.contains_key(&seq_id));
+        let first_state = manager.sequences.get(&seq_id).cloned();
+
+        // Try to add duplicate - should be ignored
+        manager.handle_add_request(seq_id, 64, 256); // Different params
+
+        // Verify the original state is unchanged
+        let current_state = manager.sequences.get(&seq_id);
+        assert_eq!(format!("{:?}", first_state), format!("{:?}", current_state));
+
+        // Verify original params (may have transitioned to Prefilling via try_schedule)
+        match manager.sequences.get(&seq_id) {
+            Some(SequenceState::Waiting(s)) => {
+                assert_eq!(s.prompt_tokens, 32); // Original value
+                assert_eq!(s.max_tokens, 128); // Original value
+            }
+            Some(SequenceState::Prefilling(s)) => {
+                // Scheduled automatically, check original params
+                assert_eq!(s.tokens_total, 32); // Original prompt_tokens
+                assert_eq!(s.max_tokens, 128); // Original value
+            }
+            _ => panic!(
+                "Expected Waiting or Prefilling state, got: {:?}",
+                manager.sequences.get(&seq_id)
+            ),
+        }
+    }
+
+    #[test]
+    fn test_add_different_sequences() {
+        let (mut manager, _tx) = create_test_manager();
+
+        // Add multiple different sequences - all should succeed
+        manager.handle_add_request(SequenceId(0), 32, 128);
+        manager.handle_add_request(SequenceId(1), 64, 256);
+        manager.handle_add_request(SequenceId(2), 16, 64);
+
+        assert_eq!(manager.sequences.len(), 3);
+        assert!(manager.sequences.contains_key(&SequenceId(0)));
+        assert!(manager.sequences.contains_key(&SequenceId(1)));
+        assert!(manager.sequences.contains_key(&SequenceId(2)));
     }
 }
