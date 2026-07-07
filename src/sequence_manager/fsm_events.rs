@@ -18,14 +18,14 @@ pub struct ScheduleEvent<'a> {
 impl<'a> ScheduleEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
-            SequenceState::Waiting(s) => self.from_waiting(s),
+            SequenceState::Waiting(s) => self.apply_to_waiting(s),
             _ => Err(Error::invalid_transition(
                 "ScheduleEvent requires Waiting state",
             )),
         }
     }
 
-    fn from_waiting(self, state: WaitingState) -> Result<SequenceState> {
+    fn apply_to_waiting(self, state: WaitingState) -> Result<SequenceState> {
         let blocks_needed = state.prompt_tokens.div_ceil(self.tokens_per_block);
 
         let mut blocks = Vec::new();
@@ -76,15 +76,15 @@ pub struct AppendTokensEvent<'a> {
 impl<'a> AppendTokensEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
-            SequenceState::Prefilling(s) => self.from_prefilling(s),
-            SequenceState::Decoding(s) => self.from_decoding(s),
+            SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
+            SequenceState::Decoding(s) => self.apply_to_decoding(s),
             _ => Err(Error::invalid_transition(
                 "AppendTokensEvent requires Prefilling or Decoding state",
             )),
         }
     }
 
-    fn from_prefilling(self, mut state: PrefillingState) -> Result<SequenceState> {
+    fn apply_to_prefilling(self, mut state: PrefillingState) -> Result<SequenceState> {
         state.tokens_filled += self.num_tokens;
 
         debug!(
@@ -106,7 +106,7 @@ impl<'a> AppendTokensEvent<'a> {
         }
     }
 
-    fn from_decoding(self, mut state: DecodingState) -> Result<SequenceState> {
+    fn apply_to_decoding(self, mut state: DecodingState) -> Result<SequenceState> {
         state.num_tokens += self.num_tokens;
 
         // Check if finished
@@ -169,15 +169,15 @@ pub struct PreemptEvent<'a> {
 impl<'a> PreemptEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
-            SequenceState::Decoding(s) => self.from_decoding(s),
-            SequenceState::Prefilling(s) => self.from_prefilling(s),
+            SequenceState::Decoding(s) => self.apply_to_decoding(s),
+            SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
             _ => Err(Error::invalid_transition(
                 "PreemptEvent requires running state",
             )),
         }
     }
 
-    fn from_decoding(self, state: DecodingState) -> Result<SequenceState> {
+    fn apply_to_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
             if let Err(e) = self.block_manager.free(block_id) {
@@ -197,7 +197,7 @@ impl<'a> PreemptEvent<'a> {
         }))
     }
 
-    fn from_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
+    fn apply_to_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
         // Free all blocks (best effort)
         for block_id in state.blocks {
             if let Err(e) = self.block_manager.free(block_id) {
@@ -224,14 +224,14 @@ pub struct ResumeEvent;
 impl ResumeEvent {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
-            SequenceState::Preempted(s) => self.from_preempted(s),
+            SequenceState::Preempted(s) => self.apply_to_preempted(s),
             _ => Err(Error::invalid_transition(
                 "ResumeEvent requires Preempted state",
             )),
         }
     }
 
-    fn from_preempted(self, state: PreemptedState) -> Result<SequenceState> {
+    fn apply_to_preempted(self, state: PreemptedState) -> Result<SequenceState> {
         debug!("Resuming seq {:?}", state.seq_id);
 
         // Transition back to waiting for rescheduling
@@ -252,14 +252,14 @@ pub struct ForkEvent<'a> {
 impl<'a> ForkEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<(SequenceState, SequenceState)> {
         match state {
-            SequenceState::Decoding(s) => self.from_decoding(s),
+            SequenceState::Decoding(s) => self.apply_to_decoding(s),
             _ => Err(Error::invalid_transition(
                 "ForkEvent requires Decoding state",
             )),
         }
     }
 
-    fn from_decoding(self, state: DecodingState) -> Result<(SequenceState, SequenceState)> {
+    fn apply_to_decoding(self, state: DecodingState) -> Result<(SequenceState, SequenceState)> {
         // Copy-on-write: increment ref counts
         for &block_id in &state.blocks {
             self.block_manager.add_ref(block_id)?;
@@ -290,15 +290,15 @@ pub struct CompleteEvent<'a> {
 impl<'a> CompleteEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
-            SequenceState::Decoding(s) => self.from_decoding(s),
-            SequenceState::Prefilling(s) => self.from_prefilling(s),
+            SequenceState::Decoding(s) => self.apply_to_decoding(s),
+            SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
             _ => Err(Error::invalid_transition(
                 "CompleteEvent requires running state",
             )),
         }
     }
 
-    fn from_decoding(self, state: DecodingState) -> Result<SequenceState> {
+    fn apply_to_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
             if let Err(e) = self.block_manager.free(block_id) {
@@ -317,7 +317,7 @@ impl<'a> CompleteEvent<'a> {
         }))
     }
 
-    fn from_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
+    fn apply_to_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
         // Free all blocks
         for block_id in state.blocks {
             if let Err(e) = self.block_manager.free(block_id) {

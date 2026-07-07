@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod api;
 mod backend;
 mod block_manager;
