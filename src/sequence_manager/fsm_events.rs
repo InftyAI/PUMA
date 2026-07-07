@@ -1,6 +1,7 @@
 use super::states::*;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
+use std::sync::Arc;
 use tracing::{debug, warn};
 
 /// FSM Events - transform states with type-safe transitions
@@ -56,7 +57,7 @@ impl<'a> ScheduleEvent<'a> {
 
         Ok(SequenceState::Prefilling(PrefillingState {
             seq_id: state.seq_id,
-            blocks,
+            blocks: Arc::new(blocks),
             tokens_filled: 0,
             tokens_total: state.prompt_tokens,
             max_tokens: state.max_tokens,
@@ -110,7 +111,7 @@ impl<'a> AppendTokensEvent<'a> {
         // Check if finished
         if state.num_tokens >= state.max_tokens {
             // Free blocks
-            for block_id in state.blocks {
+            for &block_id in state.blocks.iter() {
                 if let Err(e) = self.block_manager.free(block_id) {
                     warn!(
                         "Failed to free block {:?} for {:?}: {:?}",
@@ -134,23 +135,28 @@ impl<'a> AppendTokensEvent<'a> {
         let blocks_needed = state.num_tokens.div_ceil(self.tokens_per_block);
         let initial_block_count = state.blocks.len();
 
-        while state.blocks.len() < blocks_needed {
-            match self.block_manager.allocate() {
-                Ok(block_id) => {
-                    state.blocks.push(block_id);
-                    debug!(
-                        "Seq {:?}: allocated block, total blocks: {}",
-                        state.seq_id,
-                        state.blocks.len()
-                    );
-                }
-                Err(e) => {
-                    // Free any blocks we allocated in this call
-                    warn!("Failed to allocate block for {:?}: {:?}", state.seq_id, e);
-                    for block_id in state.blocks.drain(initial_block_count..) {
-                        let _ = self.block_manager.free(block_id);
+        if state.blocks.len() < blocks_needed {
+            // Need to allocate more blocks - use Arc::make_mut for copy-on-write
+            let blocks = Arc::make_mut(&mut state.blocks);
+
+            while blocks.len() < blocks_needed {
+                match self.block_manager.allocate() {
+                    Ok(block_id) => {
+                        blocks.push(block_id);
+                        debug!(
+                            "Seq {:?}: allocated block, total blocks: {}",
+                            state.seq_id,
+                            blocks.len()
+                        );
                     }
-                    return Err(e);
+                    Err(e) => {
+                        // Free any blocks we allocated in this call
+                        warn!("Failed to allocate block for {:?}: {:?}", state.seq_id, e);
+                        for block_id in blocks.drain(initial_block_count..) {
+                            let _ = self.block_manager.free(block_id);
+                        }
+                        return Err(e);
+                    }
                 }
             }
         }
@@ -177,7 +183,7 @@ impl<'a> PreemptEvent<'a> {
 
     fn apply_to_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
-        for block_id in state.blocks {
+        for &block_id in state.blocks.iter() {
             if let Err(e) = self.block_manager.free(block_id) {
                 warn!(
                     "Failed to free block {:?} for {:?}: {:?}",
@@ -197,7 +203,7 @@ impl<'a> PreemptEvent<'a> {
 
     fn apply_to_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
         // Free all blocks (best effort)
-        for block_id in state.blocks {
+        for &block_id in state.blocks.iter() {
             if let Err(e) = self.block_manager.free(block_id) {
                 warn!(
                     "Failed to free block {:?} for {:?}: {:?}",
@@ -259,7 +265,7 @@ impl<'a> ForkEvent<'a> {
 
     fn apply_to_decoding(self, state: DecodingState) -> Result<(SequenceState, SequenceState)> {
         // Copy-on-write: increment ref counts
-        for &block_id in &state.blocks {
+        for &block_id in state.blocks.iter() {
             self.block_manager.add_ref(block_id)?;
         }
 
@@ -298,7 +304,7 @@ impl<'a> CompleteEvent<'a> {
 
     fn apply_to_decoding(self, state: DecodingState) -> Result<SequenceState> {
         // Free all blocks
-        for block_id in state.blocks {
+        for &block_id in state.blocks.iter() {
             if let Err(e) = self.block_manager.free(block_id) {
                 warn!(
                     "Failed to free block {:?} for {:?}: {:?}",
@@ -317,7 +323,7 @@ impl<'a> CompleteEvent<'a> {
 
     fn apply_to_prefilling(self, state: PrefillingState) -> Result<SequenceState> {
         // Free all blocks
-        for block_id in state.blocks {
+        for &block_id in state.blocks.iter() {
             if let Err(e) = self.block_manager.free(block_id) {
                 warn!(
                     "Failed to free block {:?} for {:?}: {:?}",

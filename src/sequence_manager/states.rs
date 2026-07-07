@@ -1,4 +1,5 @@
 use crate::block_manager::types::*;
+use std::sync::Arc;
 
 /// FSM States - each state owns its resources
 ///
@@ -46,14 +47,14 @@ pub struct SchedulingState {
     pub prompt_tokens: usize,
     pub max_tokens: usize,
     // Partially allocated blocks (if any)
-    pub blocks: Vec<BlockId>,
+    pub blocks: Arc<Vec<BlockId>>,
 }
 
 /// Prefilling state - processing prompt
 #[derive(Debug, Clone)]
 pub struct PrefillingState {
     pub seq_id: SequenceId,
-    pub blocks: Vec<BlockId>,
+    pub blocks: Arc<Vec<BlockId>>, // Arc for cheap cloning (O(1))
     pub tokens_filled: usize,
     pub tokens_total: usize,
     pub max_tokens: usize,
@@ -63,7 +64,7 @@ pub struct PrefillingState {
 #[derive(Debug, Clone)]
 pub struct DecodingState {
     pub seq_id: SequenceId,
-    pub blocks: Vec<BlockId>,
+    pub blocks: Arc<Vec<BlockId>>, // Arc for cheap cloning (O(1))
     pub num_tokens: usize,
     pub max_tokens: usize,
 }
@@ -135,9 +136,9 @@ impl SequenceState {
 
     pub fn blocks(&self) -> Option<&[BlockId]> {
         match self {
-            SequenceState::Prefilling(s) => Some(&s.blocks),
-            SequenceState::Decoding(s) => Some(&s.blocks),
-            SequenceState::Scheduling(s) if !s.blocks.is_empty() => Some(&s.blocks),
+            SequenceState::Prefilling(s) => Some(s.blocks.as_ref()),
+            SequenceState::Decoding(s) => Some(s.blocks.as_ref()),
+            SequenceState::Scheduling(s) if !s.blocks.is_empty() => Some(s.blocks.as_ref()),
             _ => None,
         }
     }

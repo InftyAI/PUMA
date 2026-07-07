@@ -145,6 +145,15 @@ impl SequenceManager {
     }
 
     fn handle_fork_sequence(&mut self, parent_id: SequenceId, child_id: SequenceId) {
+        // Check if child_id already exists
+        if self.sequences.contains_key(&child_id) {
+            warn!(
+                "Cannot fork {:?} → {:?}: child ID already exists",
+                parent_id, child_id
+            );
+            return;
+        }
+
         let parent_state = match self.sequences.remove(&parent_id) {
             Some(s) => s,
             None => {

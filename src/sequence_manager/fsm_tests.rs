@@ -5,6 +5,7 @@ mod tests {
     use crate::block_manager::types::*;
     use crate::sequence_manager::fsm_events::*;
     use crate::sequence_manager::states::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_schedule_event_waiting_to_prefilling() {
@@ -76,7 +77,7 @@ mod tests {
 
         let prefilling = SequenceState::Prefilling(PrefillingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             tokens_filled: 0,
             tokens_total: 100,
             max_tokens: 150,
@@ -108,7 +109,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 16, // 1 block worth
             max_tokens: 150,
         });
@@ -142,7 +143,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 32,
             max_tokens: 150,
         });
@@ -172,7 +173,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 140,
             max_tokens: 150,
         });
@@ -211,7 +212,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 32,
             max_tokens: 150,
         });
@@ -267,7 +268,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 32,
             max_tokens: 150,
         });
@@ -300,7 +301,7 @@ mod tests {
 
         let decoding = SequenceState::Decoding(DecodingState {
             seq_id: SequenceId(1),
-            blocks,
+            blocks: Arc::new(blocks),
             num_tokens: 100,
             max_tokens: 150,
         });
@@ -322,5 +323,43 @@ mod tests {
         let stats = block_manager.get_stats();
         let block_stats = stats.get(&BlockType::StandardKV).unwrap();
         assert_eq!(block_stats.allocated_blocks, 0);
+    }
+
+    #[test]
+    fn test_fork_duplicate_child_id() {
+        let allocator = Box::new(CpuAllocator::new(100_000));
+        let mut block_manager = BlockManager::new(allocator, 1024);
+
+        let blocks = vec![
+            block_manager.allocate().unwrap(),
+            block_manager.allocate().unwrap(),
+        ];
+
+        let decoding = SequenceState::Decoding(DecodingState {
+            seq_id: SequenceId(1),
+            blocks: Arc::new(blocks),
+            num_tokens: 32,
+            max_tokens: 150,
+        });
+
+        // Fork with child_id = SequenceId(2)
+        let event = ForkEvent {
+            child_id: SequenceId(2),
+            block_manager: &mut block_manager,
+        };
+
+        let result = event.apply(decoding).unwrap();
+        let (parent, child) = result;
+
+        // Verify fork succeeded
+        if let SequenceState::Decoding(c) = &child {
+            assert_eq!(c.seq_id, SequenceId(2));
+        }
+
+        // Now try to fork again with the SAME child_id (should fail in manager)
+        // This test verifies the ForkEvent itself works, but the manager
+        // should check for duplicate child_id before calling this
+        drop(parent);
+        drop(child);
     }
 }

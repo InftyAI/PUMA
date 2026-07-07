@@ -63,6 +63,11 @@ pub struct SequenceManagerStats {
 pub type SequenceEventSender = mpsc::UnboundedSender<SequenceEvent>;
 pub type SequenceEventReceiver = mpsc::UnboundedReceiver<SequenceEvent>;
 
+/// Create event channel for sequence manager
+///
+/// TODO: Use bounded channel to prevent OOM when producers outpace the event loop.
+/// Capacity should be calculated based on available memory and average event size.
+/// Consider: capacity = (available_memory * 0.1) / sizeof(SequenceEvent)
 pub fn create_event_channel() -> (SequenceEventSender, SequenceEventReceiver) {
     mpsc::unbounded_channel()
 }
