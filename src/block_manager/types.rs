@@ -97,6 +97,9 @@ pub enum Error {
 
     #[error("Free failed: {0}")]
     FreeFailed(String),
+
+    #[error("Invalid state transition: {0}")]
+    InvalidTransition(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

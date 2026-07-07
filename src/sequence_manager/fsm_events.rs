@@ -18,7 +18,7 @@ impl<'a> ScheduleEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
             SequenceState::Waiting(s) => self.apply_to_waiting(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "ScheduleEvent requires Waiting state",
             )),
         }
@@ -77,7 +77,7 @@ impl<'a> AppendTokensEvent<'a> {
         match state {
             SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
             SequenceState::Decoding(s) => self.apply_to_decoding(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "AppendTokensEvent requires Prefilling or Decoding state",
             )),
         }
@@ -175,7 +175,7 @@ impl<'a> PreemptEvent<'a> {
         match state {
             SequenceState::Decoding(s) => self.apply_to_decoding(s),
             SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "PreemptEvent requires running state",
             )),
         }
@@ -229,7 +229,7 @@ impl ResumeEvent {
     pub fn apply(self, state: SequenceState) -> Result<SequenceState> {
         match state {
             SequenceState::Preempted(s) => self.apply_to_preempted(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "ResumeEvent requires Preempted state",
             )),
         }
@@ -257,7 +257,7 @@ impl<'a> ForkEvent<'a> {
     pub fn apply(self, state: SequenceState) -> Result<(SequenceState, SequenceState)> {
         match state {
             SequenceState::Decoding(s) => self.apply_to_decoding(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "ForkEvent requires Decoding state",
             )),
         }
@@ -296,7 +296,7 @@ impl<'a> CompleteEvent<'a> {
         match state {
             SequenceState::Decoding(s) => self.apply_to_decoding(s),
             SequenceState::Prefilling(s) => self.apply_to_prefilling(s),
-            _ => Err(Error::invalid_transition(
+            _ => Err(Error::InvalidTransition(
                 "CompleteEvent requires running state",
             )),
         }
@@ -373,12 +373,5 @@ impl<'a> AbortEvent<'a> {
             seq_id,
             reason: self.reason,
         }))
-    }
-}
-
-/// Invalid transition error helper
-impl Error {
-    pub fn invalid_transition(msg: &'static str) -> Self {
-        Error::AllocationFailed(format!("Invalid state transition: {}", msg))
     }
 }
