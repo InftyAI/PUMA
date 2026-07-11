@@ -6,7 +6,7 @@ mod block_manager;
 mod cli;
 mod downloader;
 mod registry;
-mod sequence_manager;
+mod scheduler;
 mod storage;
 mod system;
 mod utils;
