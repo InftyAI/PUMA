@@ -1,26 +1,27 @@
-use super::events::*;
-use super::fsm_events::*;
-use super::states::*;
+use super::events::SchedulerStats;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
+use crate::fsm::{
+    AbortedState, DecodingState, Event, FinishReason, FinishedState, PreemptedState,
+    PrefillingState, SequenceState, WaitingState,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-/// Scheduler - central controller
+/// Scheduler - memory and batch management (synchronous API)
 ///
-/// Architecture:
-/// - Scheduler DRIVES inference: builds batches → calls backend → updates state
-/// - External events (via channel): AddRequest, CancelRequest, GetBlocks, GetStats
-/// - Internal operations: token generation, state transitions, OOM handling
+/// Architecture
+/// - Pure synchronous methods (no async, no loop)
+/// - LLMEngine calls: add_request() → schedule() → process_outputs()
+/// - Owns BlockManager and performs FSM transitions directly
 ///
 /// Responsibilities:
 /// - Owns BlockManager (memory allocation)
 /// - Owns sequence state storage (FSM states)
 /// - Manages batches (waiting/prefill/decode)
 /// - Scheduling policy (what to schedule when)
-/// - Uses FSM events for type-safe state transitions
+/// - FSM transitions (internal methods with direct BlockManager access)
 pub struct Scheduler {
     /// Block manager for memory allocation
     block_manager: BlockManager,
@@ -37,9 +38,6 @@ pub struct Scheduler {
     /// Currently running sequences in decode phase
     decode_batch: Vec<SequenceId>,
 
-    /// Event receiver
-    event_rx: mpsc::UnboundedReceiver<SchedulerEvent>,
-
     /// Configuration
     max_batch_size: usize,
     tokens_per_block: usize,
@@ -50,92 +48,26 @@ impl Scheduler {
         block_manager: BlockManager,
         max_batch_size: usize,
         tokens_per_block: usize,
-    ) -> (Self, mpsc::UnboundedSender<SchedulerEvent>) {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-
-        let scheduler = Self {
+    ) -> Self {
+        Self {
             block_manager,
             sequences: HashMap::new(),
             waiting_queue: VecDeque::new(),
             prefill_batch: Vec::new(),
             decode_batch: Vec::new(),
-            event_rx,
             max_batch_size,
             tokens_per_block,
-        };
-
-        (scheduler, event_tx)
-    }
-
-    /// Main scheduler loop - drives inference and handles external events
-    ///
-    /// Loop structure:
-    /// 1. Build batch from ready sequences
-    /// 2. Run inference (TODO: integrate backend)
-    /// 3. Update state based on inference results (internal)
-    /// 4. Handle external events (non-blocking)
-    /// 5. Try scheduling new sequences
-    pub async fn run(mut self) {
-        info!("Scheduler started");
-
-        loop {
-            // 1. Build batch for inference
-            // TODO: Call backend.forward(batch) when backend is integrated
-
-            // 2. Handle external events (non-blocking)
-            // Use try_recv to not block - we want to keep generating tokens
-            match self.event_rx.try_recv() {
-                Ok(event) => {
-                    match event {
-                        SchedulerEvent::AddRequest {
-                            seq_id,
-                            prompt_tokens,
-                            max_tokens,
-                        } => {
-                            self.add_request(seq_id, prompt_tokens, max_tokens);
-                        }
-
-                        SchedulerEvent::CancelRequest { seq_id } => {
-                            self.cancel_request(seq_id);
-                        }
-
-                        SchedulerEvent::GetBlocks { seq_id, response } => {
-                            let result = self.get_blocks(seq_id);
-                            let _ = response.send(result);
-                        }
-
-                        SchedulerEvent::GetStats { response } => {
-                            let stats = self.get_stats();
-                            let _ = response.send(stats);
-                        }
-                    }
-
-                    // After event, try scheduling
-                    self.try_schedule();
-                }
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    // No events - continue to next iteration
-                }
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    info!("Event channel closed, shutting down scheduler");
-                    break;
-                }
-            }
-
-            // Small yield to prevent busy loop
-            // TODO: Remove once backend integration drives the timing
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
-
-        info!("Scheduler stopped");
     }
 
-    // ===== External Event Handlers =====
+    // ===== Public API (called by LLMEngine) =====
 
-    fn add_request(&mut self, seq_id: SequenceId, prompt_tokens: usize, max_tokens: usize) {
+    pub fn add_request(&mut self, seq_id: SequenceId, token_ids: Vec<TokenId>, max_tokens: usize) {
         debug!(
-            "Adding request: seq_id={:?}, prompt_tokens={}, max_tokens={}",
-            seq_id, prompt_tokens, max_tokens
+            "Adding request: seq_id={:?}, num_tokens={}, max_tokens={}",
+            seq_id,
+            token_ids.len(),
+            max_tokens
         );
 
         // Check duplicate
@@ -144,10 +76,10 @@ impl Scheduler {
             return;
         }
 
-        // Create waiting state
+        // Create waiting state - tokens already provided by LLMEngine
         let state = SequenceState::Waiting(WaitingState {
             seq_id,
-            prompt_tokens,
+            token_ids: Arc::new(token_ids),
             max_tokens,
         });
 
@@ -155,7 +87,7 @@ impl Scheduler {
         self.waiting_queue.push_back(seq_id);
     }
 
-    fn cancel_request(&mut self, seq_id: SequenceId) {
+    pub fn cancel_request(&mut self, seq_id: SequenceId) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
@@ -164,12 +96,11 @@ impl Scheduler {
             }
         };
 
-        let event = AbortEvent {
+        let event = Event::Abort {
             reason: "User cancelled".to_string(),
-            block_manager: &mut self.block_manager,
         };
 
-        match event.apply(state) {
+        match self.transition(state, event) {
             Ok(new_state) => {
                 info!("Cancelled sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -185,14 +116,22 @@ impl Scheduler {
         }
     }
 
-    // ===== Internal Methods (called by scheduler loop during inference) =====
-    // These are NOT exposed as events - scheduler calls them directly when:
-    // - Generating tokens (append_tokens)
-    // - Detecting stop tokens (complete_sequence)
-    // - Handling OOM (preempt_sequence, resume_sequence)
-    // - Beam search (fork_sequence)
+    /// Schedule sequences - returns whether work was scheduled
+    ///
+    /// Called by LLMEngine every iteration to:
+    /// 1. Move waiting → prefilling
+    /// 2. Allocate blocks
+    /// 3. Build batches
+    pub fn schedule(&mut self) -> bool {
+        let before = self.prefill_batch.len();
+        self.schedule_prefill();
+        self.schedule_decode();
+        self.prefill_batch.len() > before || !self.decode_batch.is_empty()
+    }
 
-    fn append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
+    // ===== Internal State Management (called by LLMEngine after inference) =====
+
+    pub fn append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
@@ -202,13 +141,12 @@ impl Scheduler {
         };
 
         let backup = state.clone();
-        let event = AppendTokensEvent {
+        let event = Event::AppendTokens {
             num_tokens,
-            block_manager: &mut self.block_manager,
             tokens_per_block: self.tokens_per_block,
         };
 
-        match event.apply(state) {
+        match self.transition(state, event) {
             Ok(new_state) => {
                 self.sequences.insert(seq_id, new_state);
             }
@@ -224,7 +162,7 @@ impl Scheduler {
         }
     }
 
-    fn complete_sequence(&mut self, seq_id: SequenceId, reason: FinishReason) {
+    pub fn complete_sequence(&mut self, seq_id: SequenceId, reason: FinishReason) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
@@ -234,12 +172,9 @@ impl Scheduler {
         };
 
         let backup = state.clone();
-        let event = CompleteEvent {
-            reason,
-            block_manager: &mut self.block_manager,
-        };
+        let event = Event::Complete { reason };
 
-        match event.apply(state) {
+        match self.transition(state, event) {
             Ok(new_state) => {
                 info!("Completed sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -255,7 +190,7 @@ impl Scheduler {
         }
     }
 
-    fn fork_sequence(&mut self, parent_id: SequenceId, child_id: SequenceId) {
+    pub fn fork_sequence(&mut self, parent_id: SequenceId, child_id: SequenceId) {
         // Check duplicate child_id
         if self.sequences.contains_key(&child_id) {
             warn!("Child ID {:?} already exists", child_id);
@@ -270,22 +205,35 @@ impl Scheduler {
             }
         };
 
+        // TODO: Fork needs special handling - returns (parent, child)
+        // For now, use manual implementation
         let backup = parent_state.clone();
-        let event = ForkEvent {
-            child_id,
-            block_manager: &mut self.block_manager,
-        };
 
-        match event.apply(parent_state) {
-            Ok((parent_state, child_state)) => {
-                self.sequences.insert(parent_id, parent_state);
-                self.sequences.insert(child_id, child_state);
-                debug!("Forked sequence {:?} → {:?}", parent_id, child_id);
+        if let SequenceState::Decoding(s) = parent_state {
+            // Copy-on-write: increment ref counts
+            for &block_id in s.blocks.iter() {
+                if let Err(e) = self.block_manager.add_ref(block_id) {
+                    warn!("Failed to fork {:?}: {:?}", parent_id, e);
+                    self.sequences.insert(parent_id, backup);
+                    return;
+                }
             }
-            Err(e) => {
-                warn!("Failed to fork {:?}: {:?}", parent_id, e);
-                self.sequences.insert(parent_id, backup);
-            }
+
+            let child = DecodingState {
+                seq_id: child_id,
+                token_ids: Arc::clone(&s.token_ids),
+                blocks: Arc::clone(&s.blocks),
+                num_tokens: s.num_tokens,
+                max_tokens: s.max_tokens,
+            };
+
+            self.sequences.insert(parent_id, SequenceState::Decoding(s));
+            self.sequences
+                .insert(child_id, SequenceState::Decoding(child));
+            debug!("Forked sequence {:?} → {:?}", parent_id, child_id);
+        } else {
+            warn!("Cannot fork {:?} - not in Decoding state", parent_id);
+            self.sequences.insert(parent_id, backup);
         }
     }
 
@@ -299,11 +247,9 @@ impl Scheduler {
         };
 
         let backup = state.clone();
-        let event = PreemptEvent {
-            block_manager: &mut self.block_manager,
-        };
+        let event = Event::Preempt;
 
-        match event.apply(state) {
+        match self.transition(state, event) {
             Ok(new_state) => {
                 info!("Preempted sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -329,9 +275,9 @@ impl Scheduler {
         };
 
         let backup = state.clone();
-        let event = ResumeEvent;
+        let event = Event::Resume;
 
-        match event.apply(state) {
+        match self.transition(state, event) {
             Ok(new_state) => {
                 debug!("Resumed sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -360,64 +306,43 @@ impl Scheduler {
                 break;
             }
 
-            // Get sequence state
-            let state = match self.sequences.get(&seq_id) {
-                Some(SequenceState::Waiting(s)) => s,
-                _ => {
-                    warn!("Sequence {:?} not in Waiting state", seq_id);
+            // Get and remove state
+            let state = match self.sequences.remove(&seq_id) {
+                Some(s) => s,
+                None => {
+                    warn!("Sequence {:?} not found", seq_id);
                     continue;
                 }
             };
 
-            // Calculate blocks needed
-            let blocks_needed = state.prompt_tokens.div_ceil(self.tokens_per_block);
+            let event = Event::Schedule {
+                tokens_per_block: self.tokens_per_block,
+            };
 
-            // Check memory
-            if !self.block_manager.can_allocate(&BlockType::StandardKV) {
-                self.waiting_queue.push_front(seq_id);
-                debug!("OOM - cannot schedule {:?}", seq_id);
-                break;
-            }
-
-            // Allocate blocks
-            let mut blocks = Vec::new();
-            for _ in 0..blocks_needed {
-                match self.block_manager.allocate() {
-                    Ok(block_id) => blocks.push(block_id),
-                    Err(Error::OutOfMemory) => {
-                        // Cleanup and stop
-                        for b in blocks {
-                            let _ = self.block_manager.free(b);
-                        }
-                        self.waiting_queue.push_front(seq_id);
-                        warn!("OOM during allocation for {:?}", seq_id);
-                        return;
-                    }
-                    Err(e) => {
-                        for b in blocks {
-                            let _ = self.block_manager.free(b);
-                        }
-                        warn!("Allocation error: {:?}", e);
-                        return;
-                    }
+            match self.transition(state.clone(), event) {
+                Ok(new_state) => {
+                    self.sequences.insert(seq_id, new_state);
+                    self.prefill_batch.push(seq_id);
+                    info!("Scheduled {:?} for prefill", seq_id);
                 }
-            }
-
-            // Transition: Waiting → Prefilling
-            let state = self.sequences.remove(&seq_id).unwrap();
-            if let SequenceState::Waiting(w) = state {
-                let new_state = SequenceState::Prefilling(PrefillingState {
-                    seq_id,
-                    blocks: Arc::new(blocks),
-                    tokens_filled: 0,
-                    tokens_total: w.prompt_tokens,
-                    max_tokens: w.max_tokens,
-                });
-
-                self.sequences.insert(seq_id, new_state);
-                self.prefill_batch.push(seq_id);
-
-                info!("Scheduled {:?} for prefill", seq_id);
+                Err(Error::OutOfMemory) => {
+                    // Transition already cleaned up allocated blocks
+                    // Restore state, put back in queue and stop
+                    self.sequences.insert(seq_id, state);
+                    self.waiting_queue.push_front(seq_id);
+                    debug!("OOM - cannot schedule {:?}", seq_id);
+                    break;
+                }
+                Err(Error::InvalidTransition(_)) => {
+                    // Not in Waiting state - restore and skip
+                    self.sequences.insert(seq_id, state);
+                    warn!("Cannot schedule {:?} - not in Waiting state", seq_id);
+                }
+                Err(e) => {
+                    // Other error - restore state
+                    self.sequences.insert(seq_id, state);
+                    warn!("Failed to schedule {:?}: {:?}", seq_id, e);
+                }
             }
         }
     }
@@ -441,14 +366,14 @@ impl Scheduler {
 
     // ===== Query Methods =====
 
-    fn get_blocks(&self, seq_id: SequenceId) -> Result<Vec<BlockId>> {
+    pub fn get_blocks(&self, seq_id: SequenceId) -> Result<Vec<BlockId>> {
         match self.sequences.get(&seq_id) {
             Some(state) => Ok(state.blocks().map(|b| b.to_vec()).unwrap_or_default()),
             None => Err(Error::UnknownSequence(seq_id)),
         }
     }
 
-    fn get_stats(&self) -> SchedulerStats {
+    pub fn get_stats(&self) -> SchedulerStats {
         let num_running = self.sequences.values().filter(|s| s.is_running()).count();
         let num_waiting = self.waiting_queue.len();
         let num_preempted = self
@@ -465,22 +390,318 @@ impl Scheduler {
             block_stats: self.block_manager.get_stats(),
         }
     }
+
+    // ===== FSM Transitions =====
+
+    /// Transition sequence state using FSM event - single entry point for all transitions
+    ///
+    /// This method provides an event-based abstraction over the internal transition methods.
+    ///
+    /// # Design
+    ///
+    /// **Public API**: Event-based for maintainability
+    /// - Single entry point makes it easy to add cross-cutting concerns (logging, metrics)
+    /// - Event enum can be serialized for debugging/replay
+    /// - Clean interface for callers
+    ///
+    /// **Internal Implementation**: Type-safe methods
+    /// - Private `transition_*()` methods enforce correct state types at compile time
+    /// - Called by this method after event dispatching
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Current sequence state (will be consumed)
+    /// * `event` - FSM event to apply
+    ///
+    /// # Returns
+    ///
+    /// New state on success, or `Error::InvalidTransition` for invalid state/event combinations
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let event = Event::Schedule { tokens_per_block: 16 };
+    /// let new_state = self.transition(state, event)?;
+    /// self.sequences.insert(seq_id, new_state);
+    /// ```
+    pub fn transition(&mut self, state: SequenceState, event: Event) -> Result<SequenceState> {
+        use crate::fsm::Event;
+
+        match (state, event) {
+            // Waiting → Prefilling
+            (SequenceState::Waiting(s), Event::Schedule { .. }) => self.transition_schedule(s),
+
+            // Prefilling → Prefilling/Decoding
+            (SequenceState::Prefilling(s), Event::AppendTokens { num_tokens, .. }) => {
+                self.transition_append_tokens_prefilling(s, num_tokens)
+            }
+
+            // Decoding → Decoding/Finished
+            (SequenceState::Decoding(s), Event::AppendTokens { num_tokens, .. }) => {
+                self.transition_append_tokens_decoding(s, num_tokens)
+            }
+
+            // Any running state → Finished
+            (state, Event::Complete { reason }) => self.transition_complete(state, reason),
+
+            // Running → Preempted
+            (
+                state @ (SequenceState::Prefilling(_) | SequenceState::Decoding(_)),
+                Event::Preempt,
+            ) => self.transition_preempt(state),
+
+            // Preempted → Waiting
+            (SequenceState::Preempted(s), Event::Resume) => self.transition_resume(s),
+
+            // Any → Aborted
+            (state, Event::Abort { reason }) => self.transition_abort(state, reason),
+
+            // Invalid transitions
+            _ => Err(Error::InvalidTransition("Invalid state transition")),
+        }
+    }
+
+    // ===== Internal Transition Methods =====
+    //
+    // These private methods implement the actual transition logic.
+    // Called by apply() after event dispatching.
+
+    /// Transition: Waiting → Prefilling (allocate blocks for tokenized prompt)
+    fn transition_schedule(&mut self, state: WaitingState) -> Result<SequenceState> {
+        let prompt_tokens = state.token_ids.len();
+        let blocks_needed = prompt_tokens.div_ceil(self.tokens_per_block);
+
+        let mut blocks = Vec::new();
+        for _ in 0..blocks_needed {
+            match self.block_manager.allocate() {
+                Ok(block_id) => blocks.push(block_id),
+                Err(Error::OutOfMemory) => {
+                    // Cleanup on OOM
+                    for block in blocks {
+                        let _ = self.block_manager.free(block);
+                    }
+                    return Err(Error::OutOfMemory);
+                }
+                Err(e) => {
+                    for block in blocks {
+                        let _ = self.block_manager.free(block);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        debug!(
+            "Scheduled seq {:?}: allocated {} blocks for {} tokens",
+            state.seq_id,
+            blocks.len(),
+            prompt_tokens
+        );
+
+        Ok(SequenceState::Prefilling(PrefillingState {
+            seq_id: state.seq_id,
+            token_ids: state.token_ids,
+            blocks: Arc::new(blocks),
+            tokens_filled: 0,
+            tokens_total: prompt_tokens,
+            max_tokens: state.max_tokens,
+        }))
+    }
+
+    /// Transition: Prefilling → Decoding or Prefilling (append tokens)
+    fn transition_append_tokens_prefilling(
+        &mut self,
+        mut state: PrefillingState,
+        num_tokens: usize,
+    ) -> Result<SequenceState> {
+        state.tokens_filled += num_tokens;
+
+        debug!(
+            "Prefilling seq {:?}: {}/{} tokens",
+            state.seq_id, state.tokens_filled, state.tokens_total
+        );
+
+        if state.tokens_filled >= state.tokens_total {
+            debug!("Seq {:?} transitioning to Decoding", state.seq_id);
+            Ok(SequenceState::Decoding(DecodingState {
+                seq_id: state.seq_id,
+                token_ids: state.token_ids,
+                blocks: state.blocks,
+                num_tokens: state.tokens_filled,
+                max_tokens: state.max_tokens,
+            }))
+        } else {
+            Ok(SequenceState::Prefilling(state))
+        }
+    }
+
+    /// Transition: Decoding → Decoding or Finished (append tokens, maybe allocate more blocks)
+    fn transition_append_tokens_decoding(
+        &mut self,
+        mut state: DecodingState,
+        num_tokens: usize,
+    ) -> Result<SequenceState> {
+        state.num_tokens += num_tokens;
+
+        // Check if finished
+        if state.num_tokens >= state.max_tokens {
+            // Free blocks
+            for &block_id in state.blocks.iter() {
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, state.seq_id, e
+                    );
+                }
+            }
+
+            debug!(
+                "Seq {:?} finished: reached max_tokens ({})",
+                state.seq_id, state.max_tokens
+            );
+
+            return Ok(SequenceState::Finished(FinishedState {
+                seq_id: state.seq_id,
+                finish_reason: FinishReason::MaxTokens,
+            }));
+        }
+
+        // Check if need more blocks
+        let blocks_needed = state.num_tokens.div_ceil(self.tokens_per_block);
+        let initial_block_count = state.blocks.len();
+
+        if state.blocks.len() < blocks_needed {
+            let blocks = Arc::make_mut(&mut state.blocks);
+
+            while blocks.len() < blocks_needed {
+                match self.block_manager.allocate() {
+                    Ok(block_id) => {
+                        blocks.push(block_id);
+                        debug!(
+                            "Seq {:?}: allocated block, total blocks: {}",
+                            state.seq_id,
+                            blocks.len()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to allocate block for {:?}: {:?}", state.seq_id, e);
+                        for block_id in blocks.drain(initial_block_count..) {
+                            let _ = self.block_manager.free(block_id);
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Ok(SequenceState::Decoding(state))
+    }
+
+    /// Transition: Prefilling/Decoding → Finished
+    fn transition_complete(
+        &mut self,
+        state: SequenceState,
+        reason: FinishReason,
+    ) -> Result<SequenceState> {
+        let seq_id = state.seq_id();
+
+        // Free blocks if any
+        if let Some(blocks) = state.blocks() {
+            for &block_id in blocks {
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, seq_id, e
+                    );
+                }
+            }
+        }
+
+        debug!("Completed seq {:?}: {:?}", seq_id, reason);
+
+        Ok(SequenceState::Finished(FinishedState {
+            seq_id,
+            finish_reason: reason,
+        }))
+    }
+
+    /// Transition: Prefilling/Decoding → Preempted (free blocks)
+    fn transition_preempt(&mut self, state: SequenceState) -> Result<SequenceState> {
+        let seq_id = state.seq_id();
+        let (token_ids, num_tokens, max_tokens) = match &state {
+            SequenceState::Prefilling(s) => {
+                (Arc::clone(&s.token_ids), s.tokens_filled, s.max_tokens)
+            }
+            SequenceState::Decoding(s) => (Arc::clone(&s.token_ids), s.num_tokens, s.max_tokens),
+            _ => {
+                return Err(Error::InvalidTransition(
+                    "Can only preempt Prefilling/Decoding",
+                ))
+            }
+        };
+
+        // Free blocks
+        if let Some(blocks) = state.blocks() {
+            for &block_id in blocks {
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, seq_id, e
+                    );
+                }
+            }
+        }
+
+        debug!("Preempted seq {:?}", seq_id);
+
+        Ok(SequenceState::Preempted(PreemptedState {
+            seq_id,
+            token_ids,
+            num_tokens,
+            max_tokens,
+        }))
+    }
+
+    /// Transition: Preempted → Waiting
+    fn transition_resume(&mut self, state: PreemptedState) -> Result<SequenceState> {
+        debug!("Resuming seq {:?}", state.seq_id);
+
+        Ok(SequenceState::Waiting(WaitingState {
+            seq_id: state.seq_id,
+            token_ids: state.token_ids,
+            max_tokens: state.max_tokens,
+        }))
+    }
+
+    /// Transition: Any → Aborted (free blocks, cleanup)
+    fn transition_abort(&mut self, state: SequenceState, reason: String) -> Result<SequenceState> {
+        let seq_id = state.seq_id();
+
+        // Free blocks if any
+        if let Some(blocks) = state.blocks() {
+            for &block_id in blocks {
+                if let Err(e) = self.block_manager.free(block_id) {
+                    warn!(
+                        "Failed to free block {:?} for {:?}: {:?}",
+                        block_id, seq_id, e
+                    );
+                }
+            }
+        }
+
+        warn!("Aborted seq {:?}: {}", seq_id, reason);
+
+        Ok(SequenceState::Aborted(AbortedState { seq_id, reason }))
+    }
 }
 
 /// Create scheduler event channel
-pub fn create_scheduler_channel() -> (
-    mpsc::UnboundedSender<SchedulerEvent>,
-    mpsc::UnboundedReceiver<SchedulerEvent>,
-) {
-    mpsc::unbounded_channel()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::block_manager::allocator::CpuAllocator;
 
-    fn create_test_scheduler() -> (Scheduler, mpsc::UnboundedSender<SchedulerEvent>) {
+    fn create_test_scheduler() -> Scheduler {
         let allocator = Box::new(CpuAllocator::new(100_000));
         let block_manager = BlockManager::new(allocator, 1024);
         Scheduler::new(block_manager, 10, 16)
@@ -488,9 +709,9 @@ mod tests {
 
     #[test]
     fn test_add_request() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
 
         assert_eq!(scheduler.sequences.len(), 1);
         assert_eq!(scheduler.waiting_queue.len(), 1);
@@ -502,10 +723,10 @@ mod tests {
 
     #[test]
     fn test_add_duplicate_request() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
-        scheduler.add_request(SequenceId(1), 100, 200); // Duplicate
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200); // Duplicate
 
         // Should not add duplicate
         assert_eq!(scheduler.sequences.len(), 1);
@@ -514,9 +735,9 @@ mod tests {
 
     #[test]
     fn test_cancel_request_waiting() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.cancel_request(SequenceId(1));
 
         // Should transition to Aborted
@@ -529,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_cancel_request_not_found() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
         // Should not panic
         scheduler.cancel_request(SequenceId(999));
@@ -538,9 +759,9 @@ mod tests {
 
     #[test]
     fn test_schedule_prefill_success() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
 
         // Should move to prefilling
@@ -554,10 +775,10 @@ mod tests {
 
     #[test]
     fn test_schedule_prefill_multiple() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
-        scheduler.add_request(SequenceId(2), 50, 100);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100);
         scheduler.schedule_prefill();
 
         // Both should be scheduled
@@ -567,11 +788,11 @@ mod tests {
 
     #[test]
     fn test_schedule_prefill_batch_limit() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
         // Add more than max_batch_size (10)
         for i in 0..15 {
-            scheduler.add_request(SequenceId(i), 100, 200);
+            scheduler.add_request(SequenceId(i), vec![0; 100], 200);
         }
         scheduler.schedule_prefill();
 
@@ -585,10 +806,10 @@ mod tests {
         // Small allocator - only 2 blocks
         let allocator = Box::new(CpuAllocator::new(2048));
         let block_manager = BlockManager::new(allocator, 1024);
-        let (mut scheduler, _tx) = Scheduler::new(block_manager, 10, 16);
+        let mut scheduler = Scheduler::new(block_manager, 10, 16);
 
         // First request needs 7 blocks (100 tokens / 16 tokens_per_block)
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
 
         // Should fail - not enough memory
@@ -602,9 +823,9 @@ mod tests {
 
     #[test]
     fn test_append_tokens_prefilling() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
 
         // Append all tokens
@@ -619,9 +840,9 @@ mod tests {
 
     #[test]
     fn test_append_tokens_decoding() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -637,9 +858,9 @@ mod tests {
 
     #[test]
     fn test_append_tokens_reaches_max() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -655,9 +876,9 @@ mod tests {
 
     #[test]
     fn test_complete_sequence() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -673,9 +894,9 @@ mod tests {
 
     #[test]
     fn test_fork_sequence() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -692,13 +913,13 @@ mod tests {
 
     #[test]
     fn test_fork_duplicate_child_id() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100);
 
-        scheduler.add_request(SequenceId(2), 50, 100); // Child ID exists
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100); // Child ID exists
         scheduler.fork_sequence(SequenceId(1), SequenceId(2)); // Should fail
 
         // Original seq 2 should be unchanged (Waiting)
@@ -710,9 +931,9 @@ mod tests {
 
     #[test]
     fn test_preempt_sequence() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -728,9 +949,9 @@ mod tests {
 
     #[test]
     fn test_resume_sequence() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100);
         scheduler.preempt_sequence(SequenceId(1));
@@ -747,9 +968,9 @@ mod tests {
 
     #[test]
     fn test_get_blocks() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
 
         let blocks = scheduler.get_blocks(SequenceId(1)).unwrap();
@@ -758,7 +979,7 @@ mod tests {
 
     #[test]
     fn test_get_blocks_not_found() {
-        let (scheduler, _tx) = create_test_scheduler();
+        let scheduler = create_test_scheduler();
 
         let result = scheduler.get_blocks(SequenceId(999));
         assert!(matches!(result, Err(Error::UnknownSequence(_))));
@@ -766,10 +987,10 @@ mod tests {
 
     #[test]
     fn test_get_stats() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
-        scheduler.add_request(SequenceId(2), 50, 100);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100);
         scheduler.schedule_prefill();
 
         let stats = scheduler.get_stats();
@@ -780,9 +1001,9 @@ mod tests {
 
     #[test]
     fn test_try_schedule() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.try_schedule();
 
         // Should schedule automatically
@@ -792,9 +1013,9 @@ mod tests {
 
     #[test]
     fn test_cancel_removes_from_batches() {
-        let (mut scheduler, _tx) = create_test_scheduler();
+        let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), 100, 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
         scheduler.schedule_prefill();
         assert_eq!(scheduler.prefill_batch.len(), 1);
 

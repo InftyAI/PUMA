@@ -1,6 +1,6 @@
 # FSM Architecture for PUMA
 
-Finite State Machine pattern for sequence lifecycle management.
+Finite State Machine pattern for sequence lifecycle management, integrated into the Scheduler.
 
 ## Core Concepts
 
@@ -8,7 +8,7 @@ Finite State Machine pattern for sequence lifecycle management.
 
 Each sequence is an independent state machine. Multiple sequences can be in different states simultaneously.
 
-**Implementation:** `src/sequence_manager/states.rs`
+**Implementation:** `src/fsm/states.rs`
 
 **States:**
 - `Waiting` - In queue, no resources allocated
@@ -32,18 +32,47 @@ Each state owns the resources it needs:
 
 Events transform states: `Event + OldState → NewState`
 
-**Implementation:** `src/sequence_manager/fsm_events.rs`
+**Implementation:** `src/fsm/events.rs`
 
 **Events:**
-- `ScheduleEvent` - Waiting → Prefilling (allocate blocks)
-- `AppendTokensEvent` - Prefilling → Decoding or Decoding → Decoding/Finished
-- `ForkEvent` - Decoding → (Decoding, Decoding) for beam search
-- `PreemptEvent` - Decoding → Preempted (free blocks on OOM)
-- `ResumeEvent` - Preempted → Waiting (re-queue)
-- `CompleteEvent` - * → Finished (free blocks)
-- `AbortEvent` - * → Aborted (cleanup)
+- `Schedule` - Waiting → Prefilling (allocate blocks)
+- `AppendTokens` - Prefilling → Decoding or Decoding → Decoding/Finished
+- `Fork` - Decoding → (Decoding, Decoding) for beam search
+- `Preempt` - Decoding → Preempted (free blocks on OOM)
+- `Resume` - Preempted → Waiting (re-queue)
+- `Complete` - * → Finished (free blocks)
+- `Abort` - * → Aborted (cleanup)
 
 Invalid transitions return `Error::InvalidTransition`.
+
+### FSM Integration with Scheduler
+
+The FSM logic is **integrated into the Scheduler** to solve the ownership boundary problem:
+
+**Public API:** `Scheduler::transition(state, event)` - Event-based abstraction
+- Single entry point for all state transitions
+- Easy to add logging, metrics, debugging
+- Event replay capability for testing
+
+**Internal Implementation:** Private `transition_*()` methods
+- Type-safe helpers that enforce correct state types
+- Direct access to `self.block_manager` - no parameter passing
+- Called by `transition()` after event dispatching
+
+```rust
+impl Scheduler {
+    pub fn transition(&mut self, state: SequenceState, event: Event) -> Result<SequenceState> {
+        match (state, event) {
+            (SequenceState::Waiting(s), Event::Schedule{..}) => 
+                self.transition_schedule(s),
+            // ... dispatches to internal methods
+        }
+    }
+
+    fn transition_schedule(&mut self, state: WaitingState) -> Result<SequenceState> {
+        // Direct access to self.block_manager, self.tokens_per_block
+    }
+}
 
 ## State Diagram
 
@@ -71,21 +100,21 @@ Invalid transitions return `Error::InvalidTransition`.
     └─ CompleteEvent → Finished
 ```
 
-## Sequence Manager
+## Scheduler Integration
 
-Event-driven architecture with async event loop.
+The Scheduler owns the FSM and manages all state transitions.
 
-**Implementation:** `src/sequence_manager/fsm_manager.rs`
+**Implementation:** `src/scheduler/core.rs`
 
 **Key features:**
-- Receives events via async channel
+- Synchronous API (LLMEngine handles async coordination)
 - Maintains `HashMap<SequenceId, SequenceState>`
+- Owns `BlockManager` directly - no parameter passing needed
 - Clones state before transitions (prevents loss on failure)
 - Restores backup on error (no block leaks)
-- Duplicate `seq_id` check prevents overwrites
-- Duplicate `child_id` check prevents fork overwrites
+- Event-based `apply()` method for maintainability
 
-**Tests:** Inline in `fsm_manager.rs` and `fsm_events.rs`
+**Tests:** `cargo test --lib` (120 tests passing)
 
 ## Arc Optimization
 
@@ -132,23 +161,67 @@ All state transitions are wrapped with backup/restore:
 5. **Performance** - Arc enables O(1) cloning, copy-on-write for efficiency
 6. **Reliability** - Backup/restore pattern prevents data loss on errors
 
+## Two-Level Event Architecture
+
+PUMA uses a two-level event system (inspired by TokenSpeed):
+
+**Level 1: FSM Events (Internal)** - `src/fsm/events.rs`
+- Created by Scheduler internally
+- Include scheduler context (tokens_per_block, etc.)
+- Used with `Scheduler::apply(state, event)`
+- Examples: `Event::Schedule`, `Event::AppendTokens`
+
+**Level 2: Scheduler Events (External)** - `src/scheduler/events.rs`
+- Created by external components (clients, GPU workers)
+- Simple data, no resource pointers
+- LLMEngine translates these to FSM events
+- Examples: `SchedulerEvent::AddRequest`, `SchedulerEvent::CancelRequest`
+
+**Why two levels?** External components cannot create FSM events because:
+- They don't own `BlockManager`
+- They don't know scheduler policies (tokens_per_block)
+- FSM events require scheduler context
+
+See `ARCHITECTURE.md` for detailed explanation and flow diagrams.
+
 ## Key Files
 
-- `src/sequence_manager/states.rs` - State definitions
-- `src/sequence_manager/fsm_events.rs` - Event implementations + tests
-- `src/sequence_manager/fsm_manager.rs` - SequenceManager + tests
-- `src/sequence_manager/events.rs` - Event channel types
-- `src/sequence_manager/id_generator.rs` - Sequential ID generator
+- `src/fsm/states.rs` - State definitions and helper methods
+- `src/fsm/events.rs` - FSM event enum (internal transitions)
+- `src/scheduler/core.rs` - Scheduler with integrated FSM (`apply()` method)
+- `src/scheduler/events.rs` - External scheduler events
+- `src/backend/llm_engine.rs` - Event coordinator
+- `ARCHITECTURE.md` - Comprehensive architecture documentation
 
 ## Usage Example
 
-See `src/sequence_manager/fsm_manager.rs` tests for complete examples.
+```rust
+// External component sends high-level event
+scheduler_tx.send(SchedulerEvent::AddRequest {
+    seq_id: 1,
+    prompt_tokens: 10,
+    max_tokens: 100,
+})?;
 
-Basic flow:
-1. Create BlockManager and SequenceManager
-2. Get event sender channel
-3. Spawn event loop in background
-4. Send `AddRequest` event
-5. Send `AppendTokens` events as tokens generate
-6. Sequence automatically transitions through states
-7. Finished/Aborted when done
+// Scheduler translates to FSM events internally
+impl Scheduler {
+    pub fn schedule(&mut self) -> bool {
+        // Pop from waiting queue
+        let state = self.sequences.remove(&seq_id).unwrap();
+        
+        // Create FSM event with scheduler context
+        let event = Event::Schedule {
+            tokens_per_block: self.tokens_per_block,
+        };
+        
+        // Perform transition (direct access to self.block_manager)
+        match self.transition(state, event) {
+            Ok(new_state) => {
+                self.sequences.insert(seq_id, new_state);
+                self.prefill_batch.push(seq_id);
+            }
+            Err(e) => { /* handle error */ }
+        }
+    }
+}
+```

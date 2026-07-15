@@ -45,6 +45,9 @@ impl SequenceId {
     }
 }
 
+/// Token ID type - used for tokenized text
+pub type TokenId = u32;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryAddress {
     pub ptr: *mut u8,

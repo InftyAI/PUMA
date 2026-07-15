@@ -36,7 +36,7 @@ pub enum SequenceState {
 #[derive(Debug, Clone)]
 pub struct WaitingState {
     pub seq_id: SequenceId,
-    pub prompt_tokens: usize,
+    pub token_ids: Arc<Vec<TokenId>>, // Arc for O(1) cloning, GPU gets reference
     pub max_tokens: usize,
 }
 
@@ -54,7 +54,8 @@ pub struct SchedulingState {
 #[derive(Debug, Clone)]
 pub struct PrefillingState {
     pub seq_id: SequenceId,
-    pub blocks: Arc<Vec<BlockId>>, // Arc for cheap cloning (O(1))
+    pub token_ids: Arc<Vec<TokenId>>, // Arc for O(1) cloning, needed if preempted
+    pub blocks: Arc<Vec<BlockId>>,    // Arc for cheap cloning (O(1))
     pub tokens_filled: usize,
     pub tokens_total: usize,
     pub max_tokens: usize,
@@ -64,7 +65,8 @@ pub struct PrefillingState {
 #[derive(Debug, Clone)]
 pub struct DecodingState {
     pub seq_id: SequenceId,
-    pub blocks: Arc<Vec<BlockId>>, // Arc for cheap cloning (O(1))
+    pub token_ids: Arc<Vec<TokenId>>, // Arc for O(1) cloning, needed if preempted
+    pub blocks: Arc<Vec<BlockId>>,    // Arc for cheap cloning (O(1))
     pub num_tokens: usize,
     pub max_tokens: usize,
 }
@@ -73,7 +75,8 @@ pub struct DecodingState {
 #[derive(Debug, Clone)]
 pub struct PreemptedState {
     pub seq_id: SequenceId,
-    pub num_tokens: usize,
+    pub token_ids: Arc<Vec<TokenId>>, // Arc for O(1) cloning, needed to resume
+    pub num_tokens: usize,            // How many tokens were generated so far
     pub max_tokens: usize,
     // No blocks - they were freed
 }
@@ -140,6 +143,18 @@ impl SequenceState {
             SequenceState::Decoding(s) => Some(s.blocks.as_ref()),
             SequenceState::Scheduling(s) if !s.blocks.is_empty() => Some(s.blocks.as_ref()),
             _ => None,
+        }
+    }
+
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            SequenceState::Waiting(_) => "Waiting",
+            SequenceState::Scheduling(_) => "Scheduling",
+            SequenceState::Prefilling(_) => "Prefilling",
+            SequenceState::Decoding(_) => "Decoding",
+            SequenceState::Preempted(_) => "Preempted",
+            SequenceState::Finished(_) => "Finished",
+            SequenceState::Aborted(_) => "Aborted",
         }
     }
 }

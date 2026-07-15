@@ -5,6 +5,7 @@ pub mod backend;
 pub mod block_manager;
 pub mod cli;
 pub mod downloader;
+pub mod fsm;
 pub mod registry;
 pub mod scheduler;
 pub mod storage;

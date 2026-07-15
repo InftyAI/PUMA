@@ -1,3 +1,31 @@
+//! Scheduler Events - External API
+//!
+//! # Two-Level Event Architecture
+//!
+//! PUMA follows TokenSpeed's pattern with two distinct event levels:
+//!
+//! ## Level 1: FSM Events (Internal - `crate::fsm::Event`)
+//! - Pure state machine transitions
+//! - Created by scheduler internally
+//! - Includes scheduler resources (BlockManager, allocators)
+//! - Examples: Schedule, AppendTokens, Complete
+//!
+//! ## Level 2: Scheduler Events (External - `SchedulerEvent`)
+//! - API boundary for external components
+//! - Simple data, no resource pointers
+//! - Can be created by clients, GPU, cache systems
+//! - Examples: AddRequest, CancelRequest, TokensGenerated
+//!
+//! ## Why Two Levels?
+//!
+//! External components (GPU, clients) **cannot create** FSM events because:
+//! - FSM events need `&mut BlockManager` (owned by scheduler)
+//! - FSM events include policy decisions (scheduler computes)
+//! - FSM events track internal state (scheduler maintains)
+//!
+//! The scheduler translates external events → FSM events, adding
+//! the necessary context and resources.
+
 use crate::block_manager::types::*;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -17,8 +45,9 @@ pub enum SchedulerEvent {
     /// Client starts a new inference request
     AddRequest {
         seq_id: SequenceId,
-        prompt_tokens: usize,
+        token_ids: Vec<TokenId>, // Tokenized by LLMEngine
         max_tokens: usize,
+        response_tx: tokio::sync::oneshot::Sender<Result<String>>, // Send result back
     },
 
     /// Client cancels a request (user stop, disconnect, timeout)

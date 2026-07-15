@@ -5,6 +5,7 @@ mod backend;
 mod block_manager;
 mod cli;
 mod downloader;
+mod fsm;
 mod registry;
 mod scheduler;
 mod storage;

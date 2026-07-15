@@ -1,7 +1,9 @@
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use prettytable::{format, row, Table};
 
+use crate::backend::llm_engine::LLMEngine;
 use crate::backend::mock::MockEngine;
 use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
@@ -209,13 +211,27 @@ pub async fn run(cli: Cli) {
                 Ok(Some(_)) => {}
             }
 
-            // Load inference engine with the model
-            // TODO: Replace MockEngine with real engine that loads model files
-            // Real engine will use: registry.get_model(&args.model)?.metadata.cache.path
-            let engine = MockEngine::new();
+            // Load tokenizer
+            // TODO: Load from model directory when model is downloaded
+            // For now, create a simple test tokenizer
+            use tokenizers::{models::bpe::BPE, Tokenizer};
+            let tokenizer = Tokenizer::new(BPE::default());
 
-            // Start interactive chat (no instruction message, just start prompting)
+            // Load inference backend
+            // TODO: Replace MockEngine with real backend that loads model files
+            // Real backend will use: registry.get_model(&args.model)?.metadata.cache.path
+            let backend = MockEngine::new();
 
+            // Create LLMEngine (integrates scheduler + memory management + tokenizer)
+            let engine = LLMEngine::new(backend, tokenizer, args.model.clone());
+
+            // TODO: Spawn engine loop when real backend integration is done
+            // For now, engine.generate() sends events but backend is MockEngine
+            // tokio::spawn(async move {
+            //     engine_copy.run().await;
+            // });
+
+            // Start interactive chat
             if let Err(e) = chat::interactive_chat(&engine, &args.model).await {
                 eprintln!("❌ Chat error: {}", e);
                 std::process::exit(1);
