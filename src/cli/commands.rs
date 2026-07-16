@@ -1,7 +1,8 @@
-
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use prettytable::{format, row, Table};
+
+use tokenizers::Tokenizer;
 
 use crate::backend::llm_engine::LLMEngine;
 use crate::backend::mock::MockEngine;
@@ -211,11 +212,24 @@ pub async fn run(cli: Cli) {
                 Ok(Some(_)) => {}
             }
 
-            // Load tokenizer
-            // TODO: Load from model directory when model is downloaded
-            // For now, create a simple test tokenizer
-            use tokenizers::{models::bpe::BPE, Tokenizer};
-            let tokenizer = Tokenizer::new(BPE::default());
+            // Load tokenizer from model directory
+            let model_info = registry.get_model(&args.model).unwrap().unwrap();
+            let tokenizer_path = format!(
+                "{}/snapshots/{}/tokenizer.json",
+                model_info.metadata.cache.path, model_info.metadata.cache.revision
+            );
+
+            let tokenizer = match Tokenizer::from_file(&tokenizer_path) {
+                Ok(tok) => tok,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Could not load tokenizer from {}: {}. Using BPE tokenizer instead.",
+                        tokenizer_path, e
+                    );
+                    use tokenizers::models::bpe::BPE;
+                    Tokenizer::new(BPE::default())
+                }
+            };
 
             // Load inference backend
             // TODO: Replace MockEngine with real backend that loads model files

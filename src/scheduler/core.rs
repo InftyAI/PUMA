@@ -1,4 +1,4 @@
-use super::events::SchedulerStats;
+use super::events::{ResponseSender, SchedulerStats};
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
 use crate::fsm::{
@@ -29,6 +29,9 @@ pub struct Scheduler {
     /// All sequences and their states
     sequences: HashMap<SequenceId, SequenceState>,
 
+    /// Response channels to send results back to clients (supports streaming)
+    response_channels: HashMap<SequenceId, ResponseSender>,
+
     /// Waiting sequences (not yet scheduled)
     waiting_queue: VecDeque<SequenceId>,
 
@@ -52,6 +55,7 @@ impl Scheduler {
         Self {
             block_manager,
             sequences: HashMap::new(),
+            response_channels: HashMap::new(),
             waiting_queue: VecDeque::new(),
             prefill_batch: Vec::new(),
             decode_batch: Vec::new(),
@@ -62,7 +66,13 @@ impl Scheduler {
 
     // ===== Public API (called by LLMEngine) =====
 
-    pub fn add_request(&mut self, seq_id: SequenceId, token_ids: Vec<TokenId>, max_tokens: usize) {
+    pub fn add_request(
+        &mut self,
+        seq_id: SequenceId,
+        token_ids: Vec<TokenId>,
+        max_tokens: usize,
+        response_tx: ResponseSender,
+    ) {
         debug!(
             "Adding request: seq_id={:?}, num_tokens={}, max_tokens={}",
             seq_id,
@@ -73,8 +83,12 @@ impl Scheduler {
         // Check duplicate
         if self.sequences.contains_key(&seq_id) {
             warn!("Duplicate seq_id {:?}", seq_id);
+            self.send_error(response_tx, Error::InvalidTransition("Duplicate sequence ID"));
             return;
         }
+
+        // Store response channel
+        self.response_channels.insert(seq_id, response_tx);
 
         // Create waiting state - tokens already provided by LLMEngine
         let state = SequenceState::Waiting(WaitingState {
@@ -162,7 +176,7 @@ impl Scheduler {
         }
     }
 
-    pub fn complete_sequence(&mut self, seq_id: SequenceId, reason: FinishReason) {
+    pub fn complete_sequence(&mut self, seq_id: SequenceId, reason: FinishReason, result: String) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
@@ -182,10 +196,18 @@ impl Scheduler {
                 // Remove from batches
                 self.prefill_batch.retain(|&id| id != seq_id);
                 self.decode_batch.retain(|&id| id != seq_id);
+
+                // Send result back to client
+                self.send_result(seq_id, result);
             }
             Err(e) => {
                 warn!("Failed to complete {:?}: {:?}", seq_id, e);
                 self.sequences.insert(seq_id, backup);
+
+                // Send error back to client
+                if let Some(response_tx) = self.response_channels.remove(&seq_id) {
+                    self.send_error(response_tx, e);
+                }
             }
         }
     }
@@ -693,6 +715,50 @@ impl Scheduler {
 
         Ok(SequenceState::Aborted(AbortedState { seq_id, reason }))
     }
+
+    // ===== Response Channel Helpers =====
+
+    /// Send a token to client (for streaming)
+    pub fn send_token(&mut self, seq_id: SequenceId, token: String) {
+        if let Some(response_tx) = self.response_channels.get(&seq_id) {
+            match response_tx {
+                ResponseSender::Stream(tx) => {
+                    let _ = tx.send(Ok(token));
+                }
+                ResponseSender::Single(_) => {
+                    // Single response - can't stream individual tokens
+                    // Will send complete result at the end
+                }
+            }
+        }
+    }
+
+    /// Send error to client
+    fn send_error(&self, response_tx: ResponseSender, error: Error) {
+        match response_tx {
+            ResponseSender::Single(tx) => {
+                let _ = tx.send(Err(error));
+            }
+            ResponseSender::Stream(tx) => {
+                let _ = tx.send(Err(error));
+            }
+        }
+    }
+
+    /// Send final result to client
+    fn send_result(&mut self, seq_id: SequenceId, result: String) {
+        if let Some(response_tx) = self.response_channels.remove(&seq_id) {
+            match response_tx {
+                ResponseSender::Single(tx) => {
+                    let _ = tx.send(Ok(result));
+                }
+                ResponseSender::Stream(_tx) => {
+                    // Already streamed tokens, just close the channel
+                    // (drop _tx automatically closes it)
+                }
+            }
+        }
+    }
 }
 
 /// Create scheduler event channel
@@ -700,6 +766,7 @@ impl Scheduler {
 mod tests {
     use super::*;
     use crate::block_manager::allocator::CpuAllocator;
+    use crate::scheduler::events::ResponseSender;
 
     fn create_test_scheduler() -> Scheduler {
         let allocator = Box::new(CpuAllocator::new(100_000));
@@ -707,11 +774,16 @@ mod tests {
         Scheduler::new(block_manager, 10, 16)
     }
 
+    fn create_dummy_response() -> ResponseSender {
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        ResponseSender::Single(tx)
+    }
+
     #[test]
     fn test_add_request() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
 
         assert_eq!(scheduler.sequences.len(), 1);
         assert_eq!(scheduler.waiting_queue.len(), 1);
@@ -725,8 +797,8 @@ mod tests {
     fn test_add_duplicate_request() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200); // Duplicate
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response()); // Duplicate
 
         // Should not add duplicate
         assert_eq!(scheduler.sequences.len(), 1);
@@ -737,7 +809,7 @@ mod tests {
     fn test_cancel_request_waiting() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.cancel_request(SequenceId(1));
 
         // Should transition to Aborted
@@ -761,7 +833,7 @@ mod tests {
     fn test_schedule_prefill_success() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
 
         // Should move to prefilling
@@ -777,8 +849,8 @@ mod tests {
     fn test_schedule_prefill_multiple() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
-        scheduler.add_request(SequenceId(2), vec![0; 50], 100);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100, create_dummy_response());
         scheduler.schedule_prefill();
 
         // Both should be scheduled
@@ -792,7 +864,7 @@ mod tests {
 
         // Add more than max_batch_size (10)
         for i in 0..15 {
-            scheduler.add_request(SequenceId(i), vec![0; 100], 200);
+            scheduler.add_request(SequenceId(i), vec![0; 100], 200, create_dummy_response());
         }
         scheduler.schedule_prefill();
 
@@ -809,7 +881,7 @@ mod tests {
         let mut scheduler = Scheduler::new(block_manager, 10, 16);
 
         // First request needs 7 blocks (100 tokens / 16 tokens_per_block)
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
 
         // Should fail - not enough memory
@@ -825,7 +897,7 @@ mod tests {
     fn test_append_tokens_prefilling() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
 
         // Append all tokens
@@ -842,7 +914,7 @@ mod tests {
     fn test_append_tokens_decoding() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -860,7 +932,7 @@ mod tests {
     fn test_append_tokens_reaches_max() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -878,11 +950,11 @@ mod tests {
     fn test_complete_sequence() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
-        scheduler.complete_sequence(SequenceId(1), FinishReason::Stop);
+        scheduler.complete_sequence(SequenceId(1), FinishReason::Stop, "test result".to_string());
 
         // Should be Finished
         assert!(matches!(
@@ -896,7 +968,7 @@ mod tests {
     fn test_fork_sequence() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -915,11 +987,11 @@ mod tests {
     fn test_fork_duplicate_child_id() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100);
 
-        scheduler.add_request(SequenceId(2), vec![0; 50], 100); // Child ID exists
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100, create_dummy_response()); // Child ID exists
         scheduler.fork_sequence(SequenceId(1), SequenceId(2)); // Should fail
 
         // Original seq 2 should be unchanged (Waiting)
@@ -933,7 +1005,7 @@ mod tests {
     fn test_preempt_sequence() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100); // → Decoding
 
@@ -951,7 +1023,7 @@ mod tests {
     fn test_resume_sequence() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         scheduler.append_tokens(SequenceId(1), 100);
         scheduler.preempt_sequence(SequenceId(1));
@@ -970,7 +1042,7 @@ mod tests {
     fn test_get_blocks() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
 
         let blocks = scheduler.get_blocks(SequenceId(1)).unwrap();
@@ -989,8 +1061,8 @@ mod tests {
     fn test_get_stats() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
-        scheduler.add_request(SequenceId(2), vec![0; 50], 100);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
+        scheduler.add_request(SequenceId(2), vec![0; 50], 100, create_dummy_response());
         scheduler.schedule_prefill();
 
         let stats = scheduler.get_stats();
@@ -1003,7 +1075,7 @@ mod tests {
     fn test_try_schedule() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.try_schedule();
 
         // Should schedule automatically
@@ -1015,7 +1087,7 @@ mod tests {
     fn test_cancel_removes_from_batches() {
         let mut scheduler = create_test_scheduler();
 
-        scheduler.add_request(SequenceId(1), vec![0; 100], 200);
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
         scheduler.schedule_prefill();
         assert_eq!(scheduler.prefill_batch.len(), 1);
 

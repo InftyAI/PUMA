@@ -38,6 +38,15 @@ use tokio::sync::mpsc;
 /// - GetBlocks: Backend queries block IDs for inference
 /// - GetStats: Monitoring/observability queries
 ///
+/// Response sender - supports both single response and streaming
+#[derive(Debug)]
+pub enum ResponseSender {
+    /// Single response (non-streaming)
+    Single(tokio::sync::oneshot::Sender<Result<String>>),
+    /// Streaming response (multiple tokens)
+    Stream(tokio::sync::mpsc::UnboundedSender<Result<String>>),
+}
+
 /// Internal operations (token generation, state transitions, OOM handling)
 /// are NOT events - the scheduler handles them directly in its run loop.
 #[derive(Debug)]
@@ -47,7 +56,7 @@ pub enum SchedulerEvent {
         seq_id: SequenceId,
         token_ids: Vec<TokenId>, // Tokenized by LLMEngine
         max_tokens: usize,
-        response_tx: tokio::sync::oneshot::Sender<Result<String>>, // Send result back
+        response_tx: ResponseSender, // Send result(s) back
     },
 
     /// Client cancels a request (user stop, disconnect, timeout)
