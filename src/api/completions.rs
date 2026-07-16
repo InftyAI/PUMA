@@ -5,7 +5,7 @@ use crate::api::routes::AppState;
 use crate::api::types::{
     CompletionChoice, CompletionRequest, CompletionResponse, ErrorResponse, Usage,
 };
-use crate::backend::InferenceEngine;
+use crate::backend::{Backend, LLMEngine};
 
 /// Handler for legacy text completions
 pub async fn completions<E: InferenceEngine + 'static>(

@@ -10,7 +10,7 @@ use tower_http::{
     LatencyUnit,
 };
 
-use crate::backend::InferenceEngine;
+use crate::backend::{Backend, LLMEngine};
 use crate::registry::model_registry::ModelRegistry;
 
 use super::{chat, completions, models};

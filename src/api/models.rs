@@ -6,7 +6,7 @@ use axum::{
 
 use crate::api::routes::AppState;
 use crate::api::types::{ErrorResponse, Model, ModelList};
-use crate::backend::InferenceEngine;
+use crate::backend::{Backend, LLMEngine};
 
 /// List all available models
 pub async fn list_models<E: InferenceEngine + 'static>(

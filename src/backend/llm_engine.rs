@@ -3,7 +3,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokenizers::Tokenizer;
 use tokio::sync::mpsc;
 
-use super::engine::{GenerateResponse, InferenceEngine};
+use super::engine::Backend;
+
+/// User-facing response for generate()
+#[derive(Debug, Clone)]
+pub struct GenerateResponse {
+    pub text: String,
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+}
 use crate::block_manager::allocator::CpuAllocator;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::SequenceId;
@@ -18,7 +26,7 @@ use crate::scheduler::events::{ResponseSender, SchedulerEvent};
 /// - Scheduler is synchronous (just methods, no async)
 /// - Direct ownership (no Arc/Mutex overhead)
 /// - Loop: handle events → schedule() → forward() → process_outputs()
-pub struct LLMEngine<B: InferenceEngine> {
+pub struct LLMEngine<B: Backend> {
     backend: B,
     scheduler: Scheduler,
     tokenizer: Tokenizer,
@@ -28,7 +36,7 @@ pub struct LLMEngine<B: InferenceEngine> {
     model: String,
 }
 
-impl<B: InferenceEngine + Clone + 'static> LLMEngine<B> {
+impl<B: Backend + Clone + 'static> LLMEngine<B> {
     pub fn new(backend: B, tokenizer: Tokenizer, model: String) -> Self {
         // Create block manager (100MB memory pool, 512 bytes per block)
         let allocator = Box::new(CpuAllocator::new(1024 * 1024 * 100));
@@ -53,6 +61,39 @@ impl<B: InferenceEngine + Clone + 'static> LLMEngine<B> {
 
     fn next_seq_id(&self) -> SequenceId {
         SequenceId(self.seq_id_counter.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Tokenize prompt
+    fn tokenize(&self, prompt: &str) -> Result<Vec<u32>, io::Error> {
+        self.tokenizer
+            .encode(prompt, false)
+            .map(|encoding| encoding.get_ids().to_vec())
+            .map_err(|e| io::Error::other(format!("Tokenization failed: {}", e)))
+    }
+
+    /// Decode token IDs to text
+    fn decode_tokens(&self, token_ids: &[u32]) -> Result<String, io::Error> {
+        self.tokenizer
+            .decode(token_ids, false)
+            .map_err(|e| io::Error::other(format!("Detokenization failed: {}", e)))
+    }
+
+    /// Send request helper
+    fn send_request(
+        &self,
+        token_ids: Vec<u32>,
+        max_tokens: usize,
+        response_tx: ResponseSender,
+    ) -> Result<(), io::Error> {
+        let seq_id = self.next_seq_id();
+        self.event_tx
+            .send(SchedulerEvent::AddRequest {
+                seq_id,
+                token_ids,
+                max_tokens,
+                response_tx,
+            })
+            .map_err(|e| io::Error::other(format!("Engine send failed: {}", e)))
     }
 
     /// Main loop - drives scheduling and inference
@@ -110,40 +151,23 @@ impl<B: InferenceEngine + Clone + 'static> LLMEngine<B> {
     }
 }
 
-// Implement InferenceEngine directly for LLMEngine
-impl<B: InferenceEngine + Clone + 'static> InferenceEngine for LLMEngine<B> {
-    async fn generate(
+// User-facing API methods
+impl<B: Backend + Clone + 'static> LLMEngine<B> {
+    /// Generate text completion (single response)
+    pub async fn generate(
         &self,
-        _model: &str,
         prompt: &str,
         max_tokens: usize,
-        _temperature: f32,
     ) -> Result<GenerateResponse, io::Error> {
-        let seq_id = self.next_seq_id();
+        // Tokenize
+        let token_ids = self.tokenize(prompt)?;
+        let prompt_tokens = token_ids.len();
 
-        // Tokenize prompt using HuggingFace tokenizer
-        let token_ids = match self.tokenizer.encode(prompt, false) {
-            Ok(encoding) => encoding.get_ids().to_vec(),
-            Err(e) => {
-                // Fallback: if tokenizer has no vocab, use dummy tokens
-                tracing::warn!("Tokenization failed ({}), using dummy tokens", e);
-                vec![0u32; prompt.len().min(100)] // Dummy: 1 token per char, max 100
-            }
-        };
-        let num_tokens = token_ids.len();
-
-        // Create response channel (single response)
+        // Create response channel
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        // Send request to scheduler with response channel
-        self.event_tx
-            .send(SchedulerEvent::AddRequest {
-                seq_id,
-                token_ids,
-                max_tokens,
-                response_tx: ResponseSender::Single(response_tx),
-            })
-            .map_err(|e| io::Error::other(format!("Engine send failed: {}", e)))?;
+        // Send request
+        self.send_request(token_ids, max_tokens, ResponseSender::Single(response_tx))?;
 
         // Wait for result from scheduler
         let text = response_rx
@@ -153,42 +177,25 @@ impl<B: InferenceEngine + Clone + 'static> InferenceEngine for LLMEngine<B> {
 
         Ok(GenerateResponse {
             text,
-            prompt_tokens: num_tokens,
-            completion_tokens: 0, // TODO: Track actual completion tokens
+            prompt_tokens,
+            completion_tokens: 0,
         })
     }
 
-    async fn generate_stream(
+    /// Generate with streaming
+    pub async fn generate_stream(
         &self,
-        _model: &str,
         prompt: &str,
         max_tokens: usize,
-        _temperature: f32,
     ) -> Result<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = String> + Send>>, io::Error> {
-        let seq_id = self.next_seq_id();
+        // Tokenize
+        let token_ids = self.tokenize(prompt)?;
 
-        // Tokenize prompt using HuggingFace tokenizer
-        let token_ids = match self.tokenizer.encode(prompt, false) {
-            Ok(encoding) => encoding.get_ids().to_vec(),
-            Err(e) => {
-                // Fallback: if tokenizer has no vocab, use dummy tokens
-                tracing::warn!("Tokenization failed ({}), using dummy tokens", e);
-                vec![0u32; prompt.len().min(100)] // Dummy: 1 token per char, max 100
-            }
-        };
-
-        // Create streaming response channel
+        // Create channel
         let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Send request to scheduler with streaming channel
-        self.event_tx
-            .send(SchedulerEvent::AddRequest {
-                seq_id,
-                token_ids,
-                max_tokens,
-                response_tx: ResponseSender::Stream(response_tx),
-            })
-            .map_err(|e| io::Error::other(format!("Engine send failed: {}", e)))?;
+        // Send request
+        self.send_request(token_ids, max_tokens, ResponseSender::Stream(response_tx))?;
 
         // Create stream that receives tokens from scheduler
         let stream = async_stream::stream! {

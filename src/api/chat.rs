@@ -16,7 +16,7 @@ use crate::api::types::{
     ChatChoice, ChatChoiceDelta, ChatCompletionChunk, ChatCompletionRequest,
     ChatCompletionResponse, ChatMessage, ChatMessageDelta, ErrorResponse, Usage,
 };
-use crate::backend::InferenceEngine;
+use crate::backend::{Backend, LLMEngine};
 
 /// Main handler for chat completions
 pub async fn chat_completions<E: InferenceEngine + 'static>(
