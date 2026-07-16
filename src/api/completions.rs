@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use axum::{extract::State, response::IntoResponse, Json};
 use uuid::Uuid;
 
@@ -8,8 +9,8 @@ use crate::api::types::{
 use crate::backend::{Backend, LLMEngine};
 
 /// Handler for legacy text completions
-pub async fn completions<E: InferenceEngine + 'static>(
-    State(state): State<AppState<E>>,
+pub async fn completions<B: Backend + Clone + 'static>(
+    State(state): State<AppState<Arc<LLMEngine<B>>>>,
     Json(req): Json<CompletionRequest>,
 ) -> impl IntoResponse {
     let engine = state.engine;

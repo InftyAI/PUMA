@@ -19,8 +19,8 @@ use crate::api::types::{
 use crate::backend::{Backend, LLMEngine};
 
 /// Main handler for chat completions
-pub async fn chat_completions<E: InferenceEngine + 'static>(
-    State(state): State<AppState<E>>,
+pub async fn chat_completions<B: Backend + Clone + 'static>(
+    State(state): State<AppState<Arc<LLMEngine<B>>>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Response {
     let engine = state.engine;
@@ -83,8 +83,8 @@ pub async fn chat_completions<E: InferenceEngine + 'static>(
 }
 
 /// Non-streaming chat completion
-async fn chat_completions_non_stream<E: InferenceEngine>(
-    engine: Arc<E>,
+async fn chat_completions_non_stream<B: Backend + Clone>(
+    engine: Arc<Arc<LLMEngine<B>>>,
     req: ChatCompletionRequest,
 ) -> Result<ChatCompletionResponse, Box<dyn std::error::Error>> {
     let id = format!("chatcmpl-{}", Uuid::new_v4());
@@ -125,8 +125,8 @@ async fn chat_completions_non_stream<E: InferenceEngine>(
 }
 
 /// Streaming chat completion
-async fn chat_completions_stream<E: InferenceEngine + 'static>(
-    engine: Arc<E>,
+async fn chat_completions_stream<B: Backend + Clone + 'static>(
+    engine: Arc<Arc<LLMEngine<B>>>,
     req: ChatCompletionRequest,
 ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let id = format!("chatcmpl-{}", Uuid::new_v4());
