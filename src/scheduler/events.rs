@@ -47,6 +47,13 @@ pub enum ResponseSender {
     Stream(tokio::sync::mpsc::UnboundedSender<Result<String>>),
 }
 
+impl ResponseSender {
+    /// Whether this sequence expects token-by-token streaming.
+    pub fn is_streaming(&self) -> bool {
+        matches!(self, ResponseSender::Stream(_))
+    }
+}
+
 /// Internal operations (token generation, state transitions, OOM handling)
 /// are NOT events - the scheduler handles them directly in its run loop.
 #[derive(Debug)]

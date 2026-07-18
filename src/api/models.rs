@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
@@ -7,12 +6,9 @@ use axum::{
 
 use crate::api::routes::AppState;
 use crate::api::types::{ErrorResponse, Model, ModelList};
-use crate::backend::{Backend, LLMEngine};
 
 /// List all available models
-pub async fn list_models<B: Backend + Clone + 'static>(
-    State(state): State<AppState<Arc<LLMEngine<B>>>>,
-) -> impl IntoResponse {
+pub async fn list_models(State(state): State<AppState>) -> impl IntoResponse {
     let registry = state.registry;
     match registry.load_models(None) {
         Ok(models) => {
@@ -44,8 +40,8 @@ pub async fn list_models<B: Backend + Clone + 'static>(
 }
 
 /// Get a specific model by ID
-pub async fn get_model<B: Backend + Clone + 'static>(
-    State(state): State<AppState<Arc<LLMEngine<B>>>>,
+pub async fn get_model(
+    State(state): State<AppState>,
     Path(model_id): Path<String>,
 ) -> impl IntoResponse {
     let registry = state.registry;

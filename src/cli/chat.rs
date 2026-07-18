@@ -5,7 +5,7 @@ use rustyline_derive::{Completer, Helper, Highlighter, Validator};
 use std::io::{self, Write};
 use tokio_stream::StreamExt;
 
-use crate::backend::{Backend, LLMEngine};
+use crate::backend::EngineHandle;
 
 #[derive(Clone)]
 struct PlaceholderHint {
@@ -44,11 +44,8 @@ impl Hinter for PlaceholderHinter {
 }
 
 /// Interactive chat loop for puma run
-pub async fn interactive_chat<E: InferenceEngine>(
-    engine: &E,
-    model: &str,
-) -> Result<(), io::Error> {
-    let mut conversation_history = Vec::new();
+pub async fn interactive_chat(engine: &EngineHandle, model: &str) -> Result<(), io::Error> {
+    let mut conversation_history: Vec<(String, String)> = Vec::new();
 
     // Setup editor with placeholder hinter
     let helper = PlaceholderHinter {
@@ -79,11 +76,15 @@ pub async fn interactive_chat<E: InferenceEngine>(
             break;
         }
 
-        // Add user message to history
-        conversation_history.push(format!("User: {}", input));
+        // Add user message to history (structured role/content turns)
+        conversation_history.push(("user".to_string(), input.clone()));
 
-        // Build prompt from conversation history
-        let prompt = conversation_history.join("\n") + "\nAssistant:";
+        // Build prompt from conversation history via the shared formatter
+        let prompt = crate::utils::prompt::format_conversation(
+            conversation_history
+                .iter()
+                .map(|(role, content)| (role.as_str(), content.as_str())),
+        );
 
         // Empty line before response
         println!();
@@ -103,7 +104,7 @@ pub async fn interactive_chat<E: InferenceEngine>(
                 println!("\n"); // Double newline after response
 
                 // Add assistant response to history
-                conversation_history.push(format!("Assistant: {}", full_response.trim()));
+                conversation_history.push(("assistant".to_string(), full_response.trim().to_string()));
             }
             Err(e) => {
                 eprintln!("Error: {}\n", e);

@@ -7,7 +7,6 @@ use axum::{
     Json,
 };
 use futures::stream::StreamExt;
-use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
@@ -16,11 +15,11 @@ use crate::api::types::{
     ChatChoice, ChatChoiceDelta, ChatCompletionChunk, ChatCompletionRequest,
     ChatCompletionResponse, ChatMessage, ChatMessageDelta, ErrorResponse, Usage,
 };
-use crate::backend::{Backend, LLMEngine};
+use crate::backend::EngineHandle;
 
 /// Main handler for chat completions
-pub async fn chat_completions<B: Backend + Clone + 'static>(
-    State(state): State<AppState<Arc<LLMEngine<B>>>>,
+pub async fn chat_completions(
+    State(state): State<AppState>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Response {
     let engine = state.engine;
@@ -83,8 +82,8 @@ pub async fn chat_completions<B: Backend + Clone + 'static>(
 }
 
 /// Non-streaming chat completion
-async fn chat_completions_non_stream<B: Backend + Clone>(
-    engine: Arc<Arc<LLMEngine<B>>>,
+async fn chat_completions_non_stream(
+    engine: EngineHandle,
     req: ChatCompletionRequest,
 ) -> Result<ChatCompletionResponse, Box<dyn std::error::Error>> {
     let id = format!("chatcmpl-{}", Uuid::new_v4());
@@ -125,8 +124,8 @@ async fn chat_completions_non_stream<B: Backend + Clone>(
 }
 
 /// Streaming chat completion
-async fn chat_completions_stream<B: Backend + Clone + 'static>(
-    engine: Arc<Arc<LLMEngine<B>>>,
+async fn chat_completions_stream(
+    engine: EngineHandle,
     req: ChatCompletionRequest,
 ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let id = format!("chatcmpl-{}", Uuid::new_v4());
@@ -236,19 +235,9 @@ async fn chat_completions_stream<B: Backend + Clone + 'static>(
     Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default())
 }
 
-/// Format chat messages into a prompt
+/// Format chat messages into a prompt via the shared prompt formatter.
 fn format_chat_messages(messages: &[ChatMessage]) -> String {
-    messages
-        .iter()
-        .map(|m| {
-            if m.role == "system" {
-                format!("System: {}", m.content)
-            } else if m.role == "user" {
-                format!("User: {}", m.content)
-            } else {
-                format!("Assistant: {}", m.content)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    crate::utils::prompt::format_conversation(
+        messages.iter().map(|m| (m.role.as_str(), m.content.as_str())),
+    )
 }

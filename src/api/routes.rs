@@ -10,33 +10,30 @@ use tower_http::{
     LatencyUnit,
 };
 
-use crate::backend::{Backend, LLMEngine};
+use crate::backend::EngineHandle;
 use crate::registry::model_registry::ModelRegistry;
 
 use super::{chat, completions, models};
 
 /// Shared application state
 #[derive(Clone)]
-pub struct AppState<B: Backend + Clone> {
-    pub engine: Arc<Arc<LLMEngine<B>>>,
+pub struct AppState {
+    pub engine: EngineHandle,
     pub registry: Arc<ModelRegistry>,
 }
 
 /// Create the API router with all endpoints
-pub fn create_router<B: Backend + Clone + Clone + 'static>(
-    engine: Arc<Arc<LLMEngine<B>>>,
-    registry: Arc<ModelRegistry>,
-) -> Router {
+pub fn create_router(engine: EngineHandle, registry: Arc<ModelRegistry>) -> Router {
     let state = AppState { engine, registry };
 
     Router::new()
         // Chat completions (most important)
-        .route("/v1/chat/completions", post(chat::chat_completions::<Arc<LLMEngine<B>>>))
+        .route("/v1/chat/completions", post(chat::chat_completions))
         // Legacy completions
-        .route("/v1/completions", post(completions::completions::<Arc<LLMEngine<B>>>))
+        .route("/v1/completions", post(completions::completions))
         // Models
-        .route("/v1/models", get(models::list_models::<Arc<LLMEngine<B>>>))
-        .route("/v1/models/:model", get(models::get_model::<Arc<LLMEngine<B>>>))
+        .route("/v1/models", get(models::list_models))
+        .route("/v1/models/:model", get(models::get_model))
         // Health check
         .route("/health", get(health_check))
         // Pass state

@@ -143,6 +143,30 @@ impl Scheduler {
         self.prefill_batch.len() > before || !self.decode_batch.is_empty()
     }
 
+    /// Drain the current prefill batch as inference work for the engine loop.
+    ///
+    /// Clears the prefill batch and returns `(seq_id, token_ids, max_tokens,
+    /// streaming)` per scheduled sequence. The engine loop runs the backend on
+    /// these and reports results back via [`send_chunk`](Self::send_chunk) and
+    /// [`complete_sequence`](Self::complete_sequence). The `streaming` flag tells
+    /// the loop whether to call the backend's streaming or single-shot path.
+    pub fn take_prefill_batch(&mut self) -> Vec<(SequenceId, Arc<Vec<TokenId>>, usize, bool)> {
+        let batch = std::mem::take(&mut self.prefill_batch);
+        batch
+            .into_iter()
+            .filter_map(|seq_id| match self.sequences.get(&seq_id) {
+                Some(SequenceState::Prefilling(s)) => {
+                    let streaming = self
+                        .response_channels
+                        .get(&seq_id)
+                        .is_some_and(|tx| tx.is_streaming());
+                    Some((seq_id, Arc::clone(&s.token_ids), s.max_tokens, streaming))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     // ===== Internal State Management (called by LLMEngine after inference) =====
 
     pub fn append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
@@ -718,16 +742,21 @@ impl Scheduler {
 
     // ===== Response Channel Helpers =====
 
-    /// Send a token to client (for streaming)
-    pub fn send_token(&mut self, seq_id: SequenceId, token: String) {
+    /// Send a decoded text chunk to a streaming client.
+    ///
+    /// The chunk is an incremental piece of detokenized output (a delta), not a
+    /// single token — see the engine's incremental decode. No-op for
+    /// non-streaming clients, which receive the full text via
+    /// [`complete_sequence`](Self::complete_sequence).
+    pub fn send_chunk(&mut self, seq_id: SequenceId, chunk: String) {
         if let Some(response_tx) = self.response_channels.get(&seq_id) {
             match response_tx {
                 ResponseSender::Stream(tx) => {
-                    let _ = tx.send(Ok(token));
+                    let _ = tx.send(Ok(chunk));
                 }
                 ResponseSender::Single(_) => {
-                    // Single response - can't stream individual tokens
-                    // Will send complete result at the end
+                    // Single response - streamed chunks are dropped;
+                    // the full result is delivered at completion.
                 }
             }
         }

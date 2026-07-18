@@ -19,19 +19,27 @@ use crate::cli::commands::{run, Cli};
 use crate::utils::file;
 
 fn main() {
-    // Setup tracing subscriber for tower-http TraceLayer
+    let cli = Cli::parse();
+
+    // Setup tracing subscriber for tower-http TraceLayer.
+    //
+    // An explicit RUST_LOG always wins. Otherwise only the long-running server
+    // logs by default; one-shot/interactive CLI commands stay quiet so their
+    // output isn't buried under per-request INFO lines.
+    let default_filter = if cli.wants_default_logging() {
+        "info,hf_hub=warn,tower_http=info,rusqlite_migration=warn"
+    } else {
+        "off"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "info,hf_hub=warn,tower_http=info,rusqlite_migration=warn".into()
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_filter.into()),
         )
         .init();
 
     // Create the root folder if it doesn't exist.
     file::create_folder_if_not_exists(&file::root_home()).unwrap();
-
-    let cli = Cli::parse();
 
     let runtime = Builder::new_multi_thread()
         .worker_threads(4)

@@ -4,7 +4,7 @@ use prettytable::{format, row, Table};
 
 use tokenizers::Tokenizer;
 
-use crate::backend::llm_engine::LLMEngine;
+use crate::backend::engine;
 use crate::backend::mock::MockEngine;
 use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
@@ -18,6 +18,16 @@ use crate::utils::format::{format_size_decimal, format_time_ago};
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+impl Cli {
+    /// Whether this command should emit logs by default.
+    ///
+    /// Only the long-running server (`serve`) logs unprompted; one-shot and
+    /// interactive CLI commands stay quiet unless the user sets `RUST_LOG`.
+    pub fn wants_default_logging(&self) -> bool {
+        matches!(self.command, Commands::SERVE(_))
+    }
 }
 
 #[derive(Subcommand)]
@@ -223,11 +233,10 @@ pub async fn run(cli: Cli) {
                 Ok(tok) => tok,
                 Err(e) => {
                     eprintln!(
-                        "Warning: Could not load tokenizer from {}: {}. Using BPE tokenizer instead.",
+                        "Warning: Could not load tokenizer from {}: {}.",
                         tokenizer_path, e
                     );
-                    use tokenizers::models::bpe::BPE;
-                    Tokenizer::new(BPE::default())
+                    std::process::exit(1);
                 }
             };
 
@@ -236,17 +245,14 @@ pub async fn run(cli: Cli) {
             // Real backend will use: registry.get_model(&args.model)?.metadata.cache.path
             let backend = MockEngine::new();
 
-            // Create LLMEngine (integrates scheduler + memory management + tokenizer)
-            let engine = LLMEngine::new(backend, tokenizer, args.model.clone());
+            // Create engine: cheap send-side handle + runner that owns the scheduler
+            let (handle, runner) = engine(backend, tokenizer, args.model.clone());
 
-            // TODO: Spawn engine loop when real backend integration is done
-            // For now, engine.generate() sends events but backend is MockEngine
-            // tokio::spawn(async move {
-            //     engine_copy.run().await;
-            // });
+            // Spawn the runner's event loop; the handle submits work via events
+            tokio::spawn(runner.serve());
 
             // Start interactive chat
-            if let Err(e) = chat::interactive_chat(&engine, &args.model).await {
+            if let Err(e) = chat::interactive_chat(&handle, &args.model).await {
                 eprintln!("❌ Chat error: {}", e);
                 std::process::exit(1);
             }
