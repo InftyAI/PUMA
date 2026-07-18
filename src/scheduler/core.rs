@@ -1,4 +1,4 @@
-use super::events::{ResponseSender, SchedulerStats};
+use super::events::{ResponseSender, SchedulerEvent, SchedulerEventReceiver, SchedulerStats};
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
 use crate::fsm::{
@@ -41,6 +41,12 @@ pub struct Scheduler {
     /// Currently running sequences in decode phase
     decode_batch: Vec<SequenceId>,
 
+    /// Receiver for external events (add/cancel/query) from clients.
+    ///
+    /// Public so the engine loop can drain it directly and feed each event to
+    /// [`handle_event`](Self::handle_event).
+    pub event_rx: SchedulerEventReceiver,
+
     /// Configuration
     max_batch_size: usize,
     tokens_per_block: usize,
@@ -49,6 +55,7 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn new(
         block_manager: BlockManager,
+        event_rx: SchedulerEventReceiver,
         max_batch_size: usize,
         tokens_per_block: usize,
     ) -> Self {
@@ -59,8 +66,40 @@ impl Scheduler {
             waiting_queue: VecDeque::new(),
             prefill_batch: Vec::new(),
             decode_batch: Vec::new(),
+            event_rx,
             max_batch_size,
             tokens_per_block,
+        }
+    }
+
+    /// Dispatch a single external event to its handler.
+    ///
+    /// One entry point for every `SchedulerEvent`: mutating events build the
+    /// corresponding FSM event and apply it; query events reply on their own
+    /// response channel.
+    pub fn handle_event(&mut self, event: SchedulerEvent) {
+        match event {
+            SchedulerEvent::AddRequest {
+                seq_id,
+                token_ids,
+                max_tokens,
+                response_tx,
+            } => self.add_request(seq_id, token_ids, max_tokens, response_tx),
+
+            SchedulerEvent::CancelRequest { seq_id } => {
+                let event = Event::Abort {
+                    reason: "User cancelled".to_string(),
+                };
+                self.apply_abort(seq_id, event);
+            }
+
+            SchedulerEvent::GetBlocks { seq_id, response } => {
+                let _ = response.send(self.get_blocks(seq_id));
+            }
+
+            SchedulerEvent::GetStats { response } => {
+                let _ = response.send(self.get_stats());
+            }
         }
     }
 
@@ -83,40 +122,62 @@ impl Scheduler {
         // Check duplicate
         if self.sequences.contains_key(&seq_id) {
             warn!("Duplicate seq_id {:?}", seq_id);
-            self.send_error(response_tx, Error::InvalidTransition("Duplicate sequence ID"));
+            self.send_error(
+                response_tx,
+                Error::InvalidTransition("Duplicate sequence ID"),
+            );
             return;
         }
 
         // Store response channel
         self.response_channels.insert(seq_id, response_tx);
 
-        // Create waiting state - tokens already provided by LLMEngine
-        let state = SequenceState::Waiting(WaitingState {
+        // Birth the sequence via an FSM transition: Empty → Waiting.
+        let event = Event::Create {
             seq_id,
-            token_ids: Arc::new(token_ids),
+            token_ids,
             max_tokens,
-        });
-
-        self.sequences.insert(seq_id, state);
-        self.waiting_queue.push_back(seq_id);
+        };
+        match self.transition(SequenceState::Empty, event) {
+            Ok(state) => {
+                self.sequences.insert(seq_id, state);
+                self.waiting_queue.push_back(seq_id);
+            }
+            Err(e) => {
+                warn!("Failed to create sequence {:?}: {:?}", seq_id, e);
+                self.response_channels.remove(&seq_id);
+            }
+        }
     }
 
+    /// Cancel a request at the user's behest.
     pub fn cancel_request(&mut self, seq_id: SequenceId) {
+        self.abort_request(seq_id, "User cancelled".to_string());
+    }
+
+    /// Abort a sequence with a caller-supplied reason.
+    ///
+    /// The reason is passed through to the FSM `Abort` event, so callers (e.g.
+    /// the engine loop on a backend failure) describe *why* rather than
+    /// borrowing the generic cancel reason.
+    pub fn abort_request(&mut self, seq_id: SequenceId, reason: String) {
+        self.apply_abort(seq_id, Event::Abort { reason });
+    }
+
+    /// Apply an `Abort` FSM event to an existing sequence and evict it from the
+    /// queues/batches. Shared by the cancel/abort paths and the event loop.
+    fn apply_abort(&mut self, seq_id: SequenceId, event: Event) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
-                warn!("Cannot cancel - sequence {:?} not found", seq_id);
+                warn!("Cannot abort - sequence {:?} not found", seq_id);
                 return;
             }
         };
 
-        let event = Event::Abort {
-            reason: "User cancelled".to_string(),
-        };
-
         match self.transition(state, event) {
             Ok(new_state) => {
-                info!("Cancelled sequence {:?}", seq_id);
+                info!("Aborted sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
 
                 // Remove from queues/batches
@@ -125,7 +186,7 @@ impl Scheduler {
                 self.decode_batch.retain(|&id| id != seq_id);
             }
             Err(e) => {
-                warn!("Failed to cancel {:?}: {:?}", seq_id, e);
+                warn!("Failed to abort {:?}: {:?}", seq_id, e);
             }
         }
     }
@@ -474,6 +535,16 @@ impl Scheduler {
         use crate::fsm::Event;
 
         match (state, event) {
+            // Empty → Waiting (new sequence)
+            (
+                SequenceState::Empty,
+                Event::Create {
+                    seq_id,
+                    token_ids,
+                    max_tokens,
+                },
+            ) => self.transition_create(seq_id, token_ids, max_tokens),
+
             // Waiting → Prefilling
             (SequenceState::Waiting(s), Event::Schedule { .. }) => self.transition_schedule(s),
 
@@ -511,6 +582,20 @@ impl Scheduler {
     //
     // These private methods implement the actual transition logic.
     // Called by apply() after event dispatching.
+
+    /// Transition: Empty → Waiting (construct a new sequence's initial state)
+    fn transition_create(
+        &mut self,
+        seq_id: SequenceId,
+        token_ids: Vec<TokenId>,
+        max_tokens: usize,
+    ) -> Result<SequenceState> {
+        Ok(SequenceState::Waiting(WaitingState {
+            seq_id,
+            token_ids: Arc::new(token_ids),
+            max_tokens,
+        }))
+    }
 
     /// Transition: Waiting → Prefilling (allocate blocks for tokenized prompt)
     fn transition_schedule(&mut self, state: WaitingState) -> Result<SequenceState> {
@@ -800,7 +885,8 @@ mod tests {
     fn create_test_scheduler() -> Scheduler {
         let allocator = Box::new(CpuAllocator::new(100_000));
         let block_manager = BlockManager::new(allocator, 1024);
-        Scheduler::new(block_manager, 10, 16)
+        let (_event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        Scheduler::new(block_manager, event_rx, 10, 16)
     }
 
     fn create_dummy_response() -> ResponseSender {
@@ -907,7 +993,8 @@ mod tests {
         // Small allocator - only 2 blocks
         let allocator = Box::new(CpuAllocator::new(2048));
         let block_manager = BlockManager::new(allocator, 1024);
-        let mut scheduler = Scheduler::new(block_manager, 10, 16);
+        let (_event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut scheduler = Scheduler::new(block_manager, event_rx, 10, 16);
 
         // First request needs 7 blocks (100 tokens / 16 tokens_per_block)
         scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());

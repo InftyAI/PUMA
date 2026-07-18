@@ -140,7 +140,6 @@ pub struct EngineRunner<B: Backend> {
     backend: B,
     scheduler: Scheduler,
     tokenizer: Arc<Tokenizer>,
-    event_rx: mpsc::UnboundedReceiver<SchedulerEvent>,
 }
 
 impl<B: Backend + Clone + 'static> EngineRunner<B> {
@@ -269,33 +268,10 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
         tracing::info!("EngineRunner started");
 
         loop {
-            // 1. Handle events (non-blocking, drain all)
-            while let Ok(event) = self.event_rx.try_recv() {
-                match event {
-                    SchedulerEvent::AddRequest {
-                        seq_id,
-                        token_ids,
-                        max_tokens,
-                        response_tx,
-                    } => {
-                        self.scheduler
-                            .add_request(seq_id, token_ids, max_tokens, response_tx);
-                    }
-
-                    SchedulerEvent::CancelRequest { seq_id } => {
-                        self.scheduler.cancel_request(seq_id);
-                    }
-
-                    SchedulerEvent::GetBlocks { seq_id, response } => {
-                        let result = self.scheduler.get_blocks(seq_id);
-                        let _ = response.send(result);
-                    }
-
-                    SchedulerEvent::GetStats { response } => {
-                        let stats = self.scheduler.get_stats();
-                        let _ = response.send(stats);
-                    }
-                }
+            // 1. Handle events (non-blocking, drain all). The scheduler owns the
+            //    event channel; the loop drains it and dispatches each event.
+            while let Ok(event) = self.scheduler.event_rx.try_recv() {
+                self.scheduler.handle_event(event);
             }
 
             // 2. Schedule (always, not event-driven)
@@ -341,11 +317,12 @@ pub fn engine<B: Backend + Clone + 'static>(
     let allocator = Box::new(CpuAllocator::new(1024 * 1024 * 100));
     let block_manager = BlockManager::new(allocator, 512);
 
-    // Create scheduler (max 32 batch size, 16 tokens per block)
-    let scheduler = Scheduler::new(block_manager, 32, 16);
-
-    // Event channel
+    // Event channel: the handle produces events, the scheduler consumes them.
     let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+    // Create scheduler (max 32 batch size, 16 tokens per block); it owns the
+    // event receiver.
+    let scheduler = Scheduler::new(block_manager, event_rx, 32, 16);
 
     let tokenizer = Arc::new(tokenizer);
 
@@ -360,7 +337,6 @@ pub fn engine<B: Backend + Clone + 'static>(
         backend,
         scheduler,
         tokenizer,
-        event_rx,
     };
 
     (handle, runner)

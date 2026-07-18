@@ -1,5 +1,5 @@
 use super::states::FinishReason;
-use crate::block_manager::types::SequenceId;
+use crate::block_manager::types::{SequenceId, TokenId};
 
 /// FSM Events - pure data that triggers state transitions
 ///
@@ -8,6 +8,13 @@ use crate::block_manager::types::SequenceId;
 /// SchedulerEvent instead.
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// Create a new sequence: Empty → Waiting
+    Create {
+        seq_id: SequenceId,
+        token_ids: Vec<TokenId>,
+        max_tokens: usize,
+    },
+
     /// Allocate blocks and start prefilling
     Schedule { tokens_per_block: usize },
 

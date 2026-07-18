@@ -8,8 +8,14 @@ use std::sync::Arc;
 ///                            ↓           ↓
 ///                            └→ Preempted ←┘
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum SequenceState {
+    /// Pre-birth placeholder: the default "from" state a new sequence
+    /// transitions out of via `Event::Create`. Never persisted in the
+    /// scheduler's sequence map.
+    #[default]
+    Empty,
+
     /// Waiting in queue for scheduling
     Waiting(WaitingState),
 
@@ -109,6 +115,7 @@ pub enum FinishReason {
 impl SequenceState {
     pub fn seq_id(&self) -> SequenceId {
         match self {
+            SequenceState::Empty => panic!("Empty state has no seq_id"),
             SequenceState::Waiting(s) => s.seq_id,
             SequenceState::Scheduling(s) => s.seq_id,
             SequenceState::Prefilling(s) => s.seq_id,
@@ -148,6 +155,7 @@ impl SequenceState {
 
     pub fn variant_name(&self) -> &'static str {
         match self {
+            SequenceState::Empty => "Empty",
             SequenceState::Waiting(_) => "Waiting",
             SequenceState::Scheduling(_) => "Scheduling",
             SequenceState::Prefilling(_) => "Prefilling",
