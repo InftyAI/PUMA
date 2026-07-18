@@ -87,10 +87,7 @@ impl Scheduler {
             } => self.add_request(seq_id, token_ids, max_tokens, response_tx),
 
             SchedulerEvent::CancelRequest { seq_id } => {
-                let event = Event::Abort {
-                    reason: "User cancelled".to_string(),
-                };
-                self.apply_abort(seq_id, event);
+                self.abort_request(seq_id, "User cancelled".to_string())
             }
 
             SchedulerEvent::GetBlocks { seq_id, response } => {
@@ -134,13 +131,12 @@ impl Scheduler {
 
         // Birth the sequence via an FSM transition: Empty → Waiting.
         let event = Event::Create {
-            seq_id,
             token_ids,
             max_tokens,
         };
-        match self.transition(SequenceState::Empty, event) {
-            Ok(state) => {
-                self.sequences.insert(seq_id, state);
+        match self.transition(seq_id, SequenceState::Empty, event) {
+            Ok(new_state) => {
+                self.sequences.insert(seq_id, new_state);
                 self.waiting_queue.push_back(seq_id);
             }
             Err(e) => {
@@ -150,23 +146,11 @@ impl Scheduler {
         }
     }
 
-    /// Cancel a request at the user's behest.
-    pub fn cancel_request(&mut self, seq_id: SequenceId) {
-        self.abort_request(seq_id, "User cancelled".to_string());
-    }
-
     /// Abort a sequence with a caller-supplied reason.
     ///
-    /// The reason is passed through to the FSM `Abort` event, so callers (e.g.
-    /// the engine loop on a backend failure) describe *why* rather than
-    /// borrowing the generic cancel reason.
+    /// The reason is passed through to the FSM `Abort` event, so callers (user
+    /// cancel, backend failure, …) describe *why* the sequence ended.
     pub fn abort_request(&mut self, seq_id: SequenceId, reason: String) {
-        self.apply_abort(seq_id, Event::Abort { reason });
-    }
-
-    /// Apply an `Abort` FSM event to an existing sequence and evict it from the
-    /// queues/batches. Shared by the cancel/abort paths and the event loop.
-    fn apply_abort(&mut self, seq_id: SequenceId, event: Event) {
         let state = match self.sequences.remove(&seq_id) {
             Some(s) => s,
             None => {
@@ -175,7 +159,7 @@ impl Scheduler {
             }
         };
 
-        match self.transition(state, event) {
+        match self.transition(seq_id, state, Event::Abort { reason }) {
             Ok(new_state) => {
                 info!("Aborted sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -245,7 +229,7 @@ impl Scheduler {
             tokens_per_block: self.tokens_per_block,
         };
 
-        match self.transition(state, event) {
+        match self.transition(seq_id, state, event) {
             Ok(new_state) => {
                 self.sequences.insert(seq_id, new_state);
             }
@@ -273,7 +257,7 @@ impl Scheduler {
         let backup = state.clone();
         let event = Event::Complete { reason };
 
-        match self.transition(state, event) {
+        match self.transition(seq_id, state, event) {
             Ok(new_state) => {
                 info!("Completed sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -356,7 +340,7 @@ impl Scheduler {
         let backup = state.clone();
         let event = Event::Preempt;
 
-        match self.transition(state, event) {
+        match self.transition(seq_id, state, event) {
             Ok(new_state) => {
                 info!("Preempted sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -384,7 +368,7 @@ impl Scheduler {
         let backup = state.clone();
         let event = Event::Resume;
 
-        match self.transition(state, event) {
+        match self.transition(seq_id, state, event) {
             Ok(new_state) => {
                 debug!("Resumed sequence {:?}", seq_id);
                 self.sequences.insert(seq_id, new_state);
@@ -426,7 +410,7 @@ impl Scheduler {
                 tokens_per_block: self.tokens_per_block,
             };
 
-            match self.transition(state.clone(), event) {
+            match self.transition(seq_id, state.clone(), event) {
                 Ok(new_state) => {
                     self.sequences.insert(seq_id, new_state);
                     self.prefill_batch.push(seq_id);
@@ -517,21 +501,30 @@ impl Scheduler {
     ///
     /// # Arguments
     ///
+    /// * `seq_id` - Sequence the event applies to
     /// * `state` - Current sequence state (will be consumed)
     /// * `event` - FSM event to apply
     ///
     /// # Returns
     ///
-    /// New state on success, or `Error::InvalidTransition` for invalid state/event combinations
+    /// The new state on success (the caller stores it in the sequence map), or
+    /// the error on failure so callers can handle rollback/OOM policy. This
+    /// function computes state only; it does not touch the sequence map or the
+    /// scheduling queues.
     ///
     /// # Example
     ///
     /// ```rust,ignore
     /// let event = Event::Schedule { tokens_per_block: 16 };
-    /// let new_state = self.transition(state, event)?;
+    /// let new_state = self.transition(seq_id, state, event)?;
     /// self.sequences.insert(seq_id, new_state);
     /// ```
-    pub fn transition(&mut self, state: SequenceState, event: Event) -> Result<SequenceState> {
+    pub fn transition(
+        &mut self,
+        seq_id: SequenceId,
+        state: SequenceState,
+        event: Event,
+    ) -> Result<SequenceState> {
         use crate::fsm::Event;
 
         match (state, event) {
@@ -539,7 +532,6 @@ impl Scheduler {
             (
                 SequenceState::Empty,
                 Event::Create {
-                    seq_id,
                     token_ids,
                     max_tokens,
                 },
@@ -925,7 +917,7 @@ mod tests {
         let mut scheduler = create_test_scheduler();
 
         scheduler.add_request(SequenceId(1), vec![0; 100], 200, create_dummy_response());
-        scheduler.cancel_request(SequenceId(1));
+        scheduler.abort_request(SequenceId(1), "User cancelled".to_string());
 
         // Should transition to Aborted
         assert!(matches!(
@@ -940,7 +932,7 @@ mod tests {
         let mut scheduler = create_test_scheduler();
 
         // Should not panic
-        scheduler.cancel_request(SequenceId(999));
+        scheduler.abort_request(SequenceId(999), "User cancelled".to_string());
         assert_eq!(scheduler.sequences.len(), 0);
     }
 
@@ -1207,7 +1199,7 @@ mod tests {
         scheduler.schedule_prefill();
         assert_eq!(scheduler.prefill_batch.len(), 1);
 
-        scheduler.cancel_request(SequenceId(1));
+        scheduler.abort_request(SequenceId(1), "User cancelled".to_string());
 
         // Should remove from batch
         assert_eq!(scheduler.prefill_batch.len(), 0);

@@ -169,7 +169,8 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
             Ok(tokens) => tokens,
             Err(e) => {
                 tracing::error!("Backend inference failed for {:?}: {}", seq_id, e);
-                self.scheduler.cancel_request(seq_id);
+                self.scheduler
+                    .abort_request(seq_id, format!("Backend inference failed: {}", e));
                 return;
             }
         };
@@ -210,7 +211,8 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
             Ok(stream) => stream,
             Err(e) => {
                 tracing::error!("Backend stream failed for {:?}: {}", seq_id, e);
-                self.scheduler.cancel_request(seq_id);
+                self.scheduler
+                    .abort_request(seq_id, format!("Backend stream failed: {}", e));
                 return;
             }
         };

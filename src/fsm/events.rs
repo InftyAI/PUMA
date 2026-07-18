@@ -10,7 +10,6 @@ use crate::block_manager::types::{SequenceId, TokenId};
 pub enum Event {
     /// Create a new sequence: Empty → Waiting
     Create {
-        seq_id: SequenceId,
         token_ids: Vec<TokenId>,
         max_tokens: usize,
     },
