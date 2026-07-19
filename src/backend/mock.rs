@@ -142,7 +142,10 @@ mod tests {
     async fn tokens_stay_within_vocab() {
         let engine = MockEngine::with_vocab_size(50);
         let out = engine.generate(vec![7, 7, 7], 32, 0.0).await.unwrap();
-        assert!(out.iter().all(|&t| t < 50), "ids must be within vocab range");
+        assert!(
+            out.iter().all(|&t| t < 50),
+            "ids must be within vocab range"
+        );
     }
 
     #[tokio::test]

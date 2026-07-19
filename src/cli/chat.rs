@@ -104,7 +104,8 @@ pub async fn interactive_chat(engine: &EngineHandle, model: &str) -> Result<(), 
                 println!("\n"); // Double newline after response
 
                 // Add assistant response to history
-                conversation_history.push(("assistant".to_string(), full_response.trim().to_string()));
+                conversation_history
+                    .push(("assistant".to_string(), full_response.trim().to_string()));
             }
             Err(e) => {
                 eprintln!("Error: {}\n", e);

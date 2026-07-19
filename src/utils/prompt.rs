@@ -44,10 +44,7 @@ mod tests {
 
     #[test]
     fn formats_turns_with_assistant_cue() {
-        let prompt = format_conversation([
-            ("system", "Be helpful."),
-            ("user", "Hello"),
-        ]);
+        let prompt = format_conversation([("system", "Be helpful."), ("user", "Hello")]);
         assert_eq!(prompt, "System: Be helpful.\nUser: Hello\nAssistant:");
     }
 

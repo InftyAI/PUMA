@@ -1,8 +1,8 @@
 use super::events::{ResponseSender, SchedulerEvent, SchedulerEventReceiver, SchedulerStats};
-use crate::sequence_manager::SequenceManager;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
 use crate::fsm::{Event, FinishReason, SequenceState};
+use crate::sequence_manager::SequenceManager;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, info, warn};

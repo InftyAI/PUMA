@@ -1,7 +1,7 @@
+use crate::block_manager::types::TokenId;
 use std::io;
 use std::pin::Pin;
 use tokio_stream::Stream;
-use crate::block_manager::types::TokenId;
 
 /// Backend trait - low-level inference that works with token IDs
 ///

@@ -238,6 +238,8 @@ async fn chat_completions_stream(
 /// Format chat messages into a prompt via the shared prompt formatter.
 fn format_chat_messages(messages: &[ChatMessage]) -> String {
     crate::utils::prompt::format_conversation(
-        messages.iter().map(|m| (m.role.as_str(), m.content.as_str())),
+        messages
+            .iter()
+            .map(|m| (m.role.as_str(), m.content.as_str())),
     )
 }
