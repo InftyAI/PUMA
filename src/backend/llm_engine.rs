@@ -38,6 +38,8 @@ pub struct EngineHandle {
     event_tx: mpsc::UnboundedSender<SchedulerEvent>,
     seq_id_counter: Arc<AtomicU64>,
     model: String,
+    /// Completion-token budget to use when a request omits `max_tokens`.
+    default_max_tokens: usize,
 }
 
 impl EngineHandle {
@@ -128,6 +130,11 @@ impl EngineHandle {
     /// Model name this handle serves
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// Completion-token budget to apply when a request omits `max_tokens`.
+    pub fn default_max_tokens(&self) -> usize {
+        self.default_max_tokens
     }
 }
 
@@ -336,26 +343,80 @@ fn stream_flush(decoded: &str, sent_len: usize) -> Option<&str> {
     }
 }
 
+/// Tunable engine parameters.
+///
+/// These were previously hardcoded inside [`engine`]. Construct via
+/// [`EngineConfig::default`] and override fields as needed:
+///
+/// ```
+/// # use puma::backend::llm_engine::EngineConfig;
+/// let cfg = EngineConfig { max_batch_size: 64, ..Default::default() };
+/// ```
+#[derive(Debug, Clone)]
+pub struct EngineConfig {
+    /// Total KV-cache memory pool, in bytes.
+    pub memory_pool_bytes: usize,
+    /// Size of a single KV block, in bytes.
+    pub block_size_bytes: usize,
+    /// Number of tokens whose KV state fits in one block. Must be > 0.
+    pub tokens_per_block: usize,
+    /// Maximum number of sequences batched together per step.
+    pub max_batch_size: usize,
+    /// Completion-token budget applied when a request does not specify one.
+    pub default_max_tokens: usize,
+}
+
+impl EngineConfig {
+    /// Default KV-cache memory pool: 100 MB.
+    pub const DEFAULT_MEMORY_POOL_BYTES: usize = 1024 * 1024 * 100;
+    /// Default KV block size, in bytes.
+    pub const DEFAULT_BLOCK_SIZE_BYTES: usize = 512;
+    /// Default tokens per KV block.
+    pub const DEFAULT_TOKENS_PER_BLOCK: usize = 16;
+    /// Default maximum batch size.
+    pub const DEFAULT_MAX_BATCH_SIZE: usize = 32;
+    /// Default completion-token budget when a request omits `max_tokens`.
+    pub const DEFAULT_MAX_TOKENS: usize = 100;
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            memory_pool_bytes: Self::DEFAULT_MEMORY_POOL_BYTES,
+            block_size_bytes: Self::DEFAULT_BLOCK_SIZE_BYTES,
+            tokens_per_block: Self::DEFAULT_TOKENS_PER_BLOCK,
+            max_batch_size: Self::DEFAULT_MAX_BATCH_SIZE,
+            default_max_tokens: Self::DEFAULT_MAX_TOKENS,
+        }
+    }
+}
+
 /// Construct a paired [`EngineHandle`] and [`EngineRunner`].
 ///
-/// Spawn `runner.serve()` on a task and share the returned handle with the API /
-/// CLI. All request submission goes through events, so the handle never
-/// touches the scheduler directly.
+/// Pass [`EngineConfig::default`] for the standard settings, or override fields
+/// to tune memory/batching. Spawn `runner.serve()` on a task and share the
+/// returned handle with the API / CLI. All request submission goes through
+/// events, so the handle never touches the scheduler directly.
 pub fn engine<B: Backend + Clone + 'static>(
     backend: B,
     tokenizer: Tokenizer,
     model: String,
+    config: EngineConfig,
 ) -> (EngineHandle, EngineRunner<B>) {
-    // Create block manager (100MB memory pool, 512 bytes per block)
-    let allocator = Box::new(CpuAllocator::new(1024 * 1024 * 100));
-    let block_manager = BlockManager::new(allocator, 512);
+    // KV-cache memory pool + block manager.
+    let allocator = Box::new(CpuAllocator::new(config.memory_pool_bytes));
+    let block_manager = BlockManager::new(allocator, config.block_size_bytes);
 
     // Event channel: the handle produces events, the scheduler consumes them.
     let (event_tx, event_rx) = mpsc::unbounded_channel();
 
-    // Create scheduler (max 32 batch size, 16 tokens per block); it owns the
-    // event receiver.
-    let scheduler = Scheduler::new(block_manager, event_rx, 32, 16);
+    // The scheduler owns the event receiver.
+    let scheduler = Scheduler::new(
+        block_manager,
+        event_rx,
+        config.max_batch_size,
+        config.tokens_per_block,
+    );
 
     let tokenizer = Arc::new(tokenizer);
 
@@ -364,6 +425,7 @@ pub fn engine<B: Backend + Clone + 'static>(
         event_tx,
         seq_id_counter: Arc::new(AtomicU64::new(1)),
         model,
+        default_max_tokens: config.default_max_tokens,
     };
 
     let runner = EngineRunner {
@@ -392,7 +454,12 @@ mod tests {
     async fn test_llm_engine() {
         let backend = MockEngine::new();
         let tokenizer = create_test_tokenizer();
-        let (handle, runner) = engine(backend, tokenizer, "test-model".to_string());
+        let (handle, runner) = engine(
+            backend,
+            tokenizer,
+            "test-model".to_string(),
+            EngineConfig::default(),
+        );
 
         tokio::spawn(runner.serve());
 

@@ -97,7 +97,8 @@ async fn chat_completions_non_stream(
         .generate(
             &req.model,
             &prompt,
-            req.max_tokens.unwrap_or(100),
+            req.max_tokens
+                .unwrap_or_else(|| engine.default_max_tokens()),
             req.temperature.unwrap_or(0.7),
         )
         .await?;
@@ -169,7 +170,8 @@ async fn chat_completions_stream(
             .generate_stream(
                 &model,
                 &prompt,
-                req.max_tokens.unwrap_or(100),
+                req.max_tokens
+                    .unwrap_or_else(|| engine.default_max_tokens()),
                 req.temperature.unwrap_or(0.7),
             )
             .await

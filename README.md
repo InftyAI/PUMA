@@ -51,26 +51,29 @@ make build
 
 ```bash
 # Download a model
-puma pull inftyai/tiny-random-gpt2
+puma pull qwen/qwen2.5-0.5b
+
+# Run a model in an interactive chat
+puma run qwen/qwen2.5-0.5b
 
 # List all models
 puma ls
 
 # Inspect model details
-puma inspect inftyai/tiny-random-gpt2
+puma inspect qwen/qwen2.5-0.5b
 
 # Check system info
 puma info
 
 # Remove a model
-puma rm inftyai/tiny-random-gpt2
+puma rm qwen/qwen2.5-0.5b
 ```
 
 ### API Server
 
 ```bash
 # Start the inference server with a model
-puma serve inftyai/tiny-random-gpt2
+puma serve qwen/qwen2.5-0.5b
 
 # Server will start on http://0.0.0.0:8000
 # API endpoints:
@@ -91,7 +94,7 @@ curl http://localhost:8000/health
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "inftyai/tiny-random-gpt2",
+    "model": "qwen/qwen2.5-0.5b",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 
@@ -109,9 +112,9 @@ curl http://localhost:8000/v1/chat/completions \
 | `rm <model>` | ✅ | Remove model and cache |
 | `info` | ✅ | Display system information |
 | `version` | ✅ | Show PUMA version |
+| `run <model>` | ✅ | Run a model in an interactive chat |
 | `serve <model>` | ✅ | Start OpenAI-compatible API server with a model |
 | `ps` | 🚧 | List running models |
-| `run` | 🚧 | Start model inference |
 | `stop` | 🚧 | Stop running model |
 
 ## Advanced Usage
@@ -144,6 +147,17 @@ puma ls llama -l author=meta
 
 **Available filters:** `author`, `task`, `license`, `provider`, `model_series`
 
+### Engine Tuning
+
+Both `run` and `serve` accept flags to tune the inference engine (KV-cache pool,
+block size, batch size, default token budget):
+
+```bash
+puma run qwen/qwen2.5-0.5b --max-batch-size 64 --default-max-tokens 256
+```
+
+See [docs/configuration.md](docs/configuration.md) for the full list of flags and defaults.
+
 ## API Server
 
 PUMA provides an OpenAI-compatible API server for model inference.
@@ -152,14 +166,16 @@ PUMA provides an OpenAI-compatible API server for model inference.
 
 ```bash
 # Start server with a model (default: 0.0.0.0:8000)
-puma serve inftyai/tiny-random-gpt2
+puma serve qwen/qwen2.5-0.5b
 
 # Custom host and port
-puma serve inftyai/tiny-random-gpt2 --host 127.0.0.1 --port 3000
+puma serve qwen/qwen2.5-0.5b --host 127.0.0.1 --port 3000
 
 # Model must be pulled first
-puma pull inftyai/tiny-random-gpt2
+puma pull qwen/qwen2.5-0.5b
 ```
+
+Engine parameters (KV-cache, batch size, etc.) can be tuned with additional flags — see [docs/configuration.md](docs/configuration.md).
 
 ### API Endpoints
 
@@ -168,7 +184,7 @@ puma pull inftyai/tiny-random-gpt2
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "inftyai/tiny-random-gpt2",
+    "model": "qwen/qwen2.5-0.5b",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Hello!"}
@@ -183,7 +199,7 @@ curl http://localhost:8000/v1/chat/completions \
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "inftyai/tiny-random-gpt2",
+    "model": "qwen/qwen2.5-0.5b",
     "messages": [{"role": "user", "content": "Tell me a story"}],
     "stream": true
   }'
@@ -214,7 +230,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="inftyai/tiny-random-gpt2",
+    model="qwen/qwen2.5-0.5b",
     messages=[
         {"role": "user", "content": "Hello!"}
     ]
@@ -226,28 +242,28 @@ print(response.choices[0].message.content)
 ### Inspect Output
 
 ```bash
-$ puma inspect inftyai/tiny-random-gpt2
+$ puma inspect qwen/qwen2.5-0.5b
 
-name: inftyai/tiny-random-gpt2
+name: qwen/qwen2.5-0.5b
 kind: Model
 spec:
-  author:         inftyai
-  model_series:   gpt2
+  author:         qwen
+  model_series:   qwen2
   task:           text-generation
-  license:        MIT
-  context_window: 2.05K
+  license:        APACHE-2.0
+  context_window: 32.77K
   safetensors:
-    total:        7.00B
+    total:        494.03M
     parameters:
-      f32:        7.00B
-  provider:     huggingface
+      bf16:        494.03M
+  provider:       huggingface
   cache:
-    revision:     abc123de
-    size:         1.24 GB
-    path:         ~/.puma/cache/...
+    revision:       060db6499f32faf8b98477b0a26969ef7d8b9987
+    size:           988.10 MB
+    path:           ~/.puma/cache/huggingface/models--qwen--qwen2.5-0.5b
 status:
-  created:      2 hours ago
-  updated:      2 hours ago
+  created:        2 months ago
+  updated:        2 months ago
 ```
 
 ## Model Management
