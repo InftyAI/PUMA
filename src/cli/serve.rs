@@ -1,8 +1,11 @@
 use colored::Colorize;
 use std::sync::Arc;
+use tokenizers::models::bpe::BPE;
+use tokenizers::Tokenizer;
 use tracing::{debug, info};
 
 use crate::api::routes::create_router;
+use crate::backend::engine;
 use crate::backend::mock::MockEngine;
 use crate::registry::model_registry::ModelRegistry;
 
@@ -30,16 +33,25 @@ pub async fn execute(
     info!("Starting PUMA to serve model: {}", model_name);
 
     // Initialize backend (MockEngine for now, replace with MLX later)
-    let engine = Arc::new(MockEngine::new());
-    info!("Inference engine initialized");
+    let backend = MockEngine::new();
     debug!("Using MockEngine backend");
+
+    // TODO: Load the model's real tokenizer; placeholder BPE for now
+    let tokenizer = Tokenizer::new(BPE::default());
+
+    // Create engine: cheap send-side handle + runner that owns the scheduler
+    let (handle, runner) = engine(backend, tokenizer, model_name.to_string());
+
+    // Spawn the runner's event loop; the handle submits work via events
+    tokio::spawn(runner.serve());
+    info!("Inference engine initialized");
 
     // Initialize model registry
     let registry = Arc::new(ModelRegistry::new(None));
     info!("Model registry loaded");
 
     // Create router
-    let app = create_router(engine, registry);
+    let app = create_router(handle, registry);
 
     // Bind address
     let addr = format!("{}:{}", host, port);
@@ -54,7 +66,7 @@ pub async fn execute(
     info!("  GET  /health");
 
     // Start server
-    debug!("Starting axum server");
+    debug!("Starting server");
     axum::serve(listener, app).await?;
 
     info!("Server shutdown");

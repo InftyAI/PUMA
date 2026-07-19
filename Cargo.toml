@@ -2,7 +2,7 @@
 name = "puma"
 version = "0.0.3"
 edition = "2021"
-description = "A lightweight, high-performance inference engine for local AI."
+description = "A lightweight, high-performance model engine for local AI."
 license = "Apache-2.0"
 repository = "https://github.com/InftyAI/PUMA"
 homepage = "https://github.com/InftyAI/PUMA"
@@ -31,6 +31,7 @@ sysinfo = "0.32"
 rusqlite = { version = "0.32", features = ["bundled"] }
 rusqlite_migration = "1.3"
 regex = "1.11"
+thiserror = "2.0"
 
 # Web server
 axum = "0.7"
@@ -39,6 +40,10 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 futures = "0.3"
 tokio-stream = "0.1"
+rustyline = "14.0"
+rustyline-derive = "0.10"
+tokenizers = "0.20"
+async-stream = "0.3"
 
 [dev-dependencies]
 tempfile = "3.12"

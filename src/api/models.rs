@@ -6,12 +6,9 @@ use axum::{
 
 use crate::api::routes::AppState;
 use crate::api::types::{ErrorResponse, Model, ModelList};
-use crate::backend::InferenceEngine;
 
 /// List all available models
-pub async fn list_models<E: InferenceEngine + 'static>(
-    State(state): State<AppState<E>>,
-) -> impl IntoResponse {
+pub async fn list_models(State(state): State<AppState>) -> impl IntoResponse {
     let registry = state.registry;
     match registry.load_models(None) {
         Ok(models) => {
@@ -43,8 +40,8 @@ pub async fn list_models<E: InferenceEngine + 'static>(
 }
 
 /// Get a specific model by ID
-pub async fn get_model<E: InferenceEngine + 'static>(
-    State(state): State<AppState<E>>,
+pub async fn get_model(
+    State(state): State<AppState>,
     Path(model_id): Path<String>,
 ) -> impl IntoResponse {
     let registry = state.registry;

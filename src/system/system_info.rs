@@ -280,3 +280,82 @@ impl SystemInfo {
         println!("  Running Models:     {}", self.running_models);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_collect_populates_basic_fields() {
+        let info = SystemInfo::collect();
+
+        // Version comes from Cargo and must be non-empty.
+        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+        // Any real host reports at least one CPU core.
+        assert!(info.cpu_cores >= 1);
+        // format_size never yields an empty string.
+        assert!(!info.total_memory.is_empty());
+        assert!(!info.cache_size.is_empty());
+        // running_models tracking is not implemented yet.
+        assert_eq!(info.running_models, 0);
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let info = SystemInfo {
+            version: "1.2.3".to_string(),
+            os: "TestOS".to_string(),
+            architecture: "x86_64".to_string(),
+            cpu_cores: 8,
+            total_memory: "16.00 GB".to_string(),
+            gpu_info: vec![GpuInfo {
+                name: "Test GPU".to_string(),
+                backend: "Metal".to_string(),
+                memory: Some("10 GPU cores".to_string()),
+            }],
+            cache_dir: "/tmp/cache".to_string(),
+            cache_size: "0 B".to_string(),
+            models_count: 2,
+            running_models: 0,
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let back: SystemInfo = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.version, info.version);
+        assert_eq!(back.cpu_cores, info.cpu_cores);
+        assert_eq!(back.gpu_info.len(), 1);
+        assert_eq!(back.gpu_info[0].backend, "Metal");
+        assert_eq!(back.gpu_info[0].memory.as_deref(), Some("10 GPU cores"));
+    }
+
+    #[test]
+    fn test_calculate_cache_size_missing_dir_is_zero() {
+        let missing = PathBuf::from("/nonexistent/puma/cache/path/xyz");
+        assert_eq!(SystemInfo::calculate_cache_size(&missing), 0);
+    }
+
+    #[test]
+    fn test_cache_size_sums_files_and_subdirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // A file at the top level and one nested in a subdirectory.
+        fs::write(root.join("a.bin"), vec![0u8; 4096]).unwrap();
+        let sub = root.join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("b.bin"), vec![0u8; 4096]).unwrap();
+
+        // Disk usage is block-based (blocks * 512); an empty dir contributes 0
+        // files, so total should reflect both files' on-disk size (> 0) and
+        // recurse into the subdirectory.
+        let total = SystemInfo::calculate_cache_size(&root);
+        let sub_only = SystemInfo::dir_size(&sub);
+        assert!(sub_only > 0, "nested file should contribute size");
+        assert!(
+            total >= sub_only,
+            "top-level total {total} should include nested {sub_only}"
+        );
+    }
+}

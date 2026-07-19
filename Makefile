@@ -1,4 +1,5 @@
 build:
+	rm -rf ./puma
 	cargo build && cp target/debug/puma ./puma
 
 test:

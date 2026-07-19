@@ -5,11 +5,10 @@ use crate::api::routes::AppState;
 use crate::api::types::{
     CompletionChoice, CompletionRequest, CompletionResponse, ErrorResponse, Usage,
 };
-use crate::backend::InferenceEngine;
 
 /// Handler for legacy text completions
-pub async fn completions<E: InferenceEngine + 'static>(
-    State(state): State<AppState<E>>,
+pub async fn completions(
+    State(state): State<AppState>,
     Json(req): Json<CompletionRequest>,
 ) -> impl IntoResponse {
     let engine = state.engine;

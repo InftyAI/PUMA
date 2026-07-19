@@ -13,13 +13,21 @@ use tempfile::TempDir;
 use tower::util::ServiceExt; // for `oneshot` and `ready`
 
 use super::routes::create_router;
+use crate::backend::engine;
 use crate::backend::mock::MockEngine;
 use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
 /// Returns the router and the temp directory (which must be kept alive)
 fn create_test_app() -> (axum::Router, TempDir) {
-    let engine = Arc::new(MockEngine::new());
+    // Build the engine and spawn its runner; the handle drives the router
+    let (handle, runner) = engine(
+        MockEngine::new(),
+        create_test_tokenizer(),
+        "test-model".to_string(),
+    );
+    tokio::spawn(runner.serve());
+
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(ModelRegistry::new(Some(temp_dir.path().to_path_buf())));
 
@@ -49,7 +57,13 @@ fn create_test_app() -> (axum::Router, TempDir) {
         .register_model(test_model)
         .expect("failed to register test model");
 
-    (create_router(engine, registry), temp_dir)
+    (create_router(handle, registry), temp_dir)
+}
+
+/// Simple BPE tokenizer for tests
+fn create_test_tokenizer() -> tokenizers::Tokenizer {
+    use tokenizers::models::bpe::BPE;
+    tokenizers::Tokenizer::new(BPE::default())
 }
 
 /// Helper to make a JSON request

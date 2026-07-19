@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod commands;
 pub mod inspect;
 pub mod ls;

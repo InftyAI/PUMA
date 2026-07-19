@@ -2,7 +2,11 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use prettytable::{format, row, Table};
 
-use crate::cli::{inspect, ls, rm};
+use tokenizers::Tokenizer;
+
+use crate::backend::engine;
+use crate::backend::mock::MockEngine;
+use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
@@ -14,6 +18,16 @@ use crate::utils::format::{format_size_decimal, format_time_ago};
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+impl Cli {
+    /// Whether this command should emit logs by default.
+    ///
+    /// Only the long-running server (`serve`) logs unprompted; one-shot and
+    /// interactive CLI commands stay quiet unless the user sets `RUST_LOG`.
+    pub fn wants_default_logging(&self) -> bool {
+        matches!(self.command, Commands::SERVE(_))
+    }
 }
 
 #[derive(Subcommand)]
@@ -188,16 +202,9 @@ pub async fn run(cli: Cli) {
         Commands::RUN(args) => {
             let registry = ModelRegistry::new(None);
 
-            // Check if model exists
+            // Ensure model exists locally, download if needed
             match registry.get_model(&args.model) {
-                Ok(Some(_)) => {
-                    // Model exists, proceed
-                    println!("Running model: {}", args.model);
-                    // TODO: Implement actual model execution
-                    println!("Model execution not yet implemented");
-                }
                 Ok(None) => {
-                    // Model not found, download it first
                     println!(
                         "Model {} not found locally. Downloading...",
                         args.model.cyan().bold()
@@ -207,16 +214,47 @@ pub async fn run(cli: Cli) {
                         eprintln!("❌ Error: {}", e);
                         std::process::exit(1);
                     }
-
-                    // Now run the model
-                    println!("Running model: {}", args.model.cyan().bold());
-                    // TODO: Implement actual model execution
-                    println!("Model execution not yet implemented");
                 }
                 Err(e) => {
                     eprintln!("❌ Error checking model: {}", e);
                     std::process::exit(1);
                 }
+                Ok(Some(_)) => {}
+            }
+
+            // Load tokenizer from model directory
+            let model_info = registry.get_model(&args.model).unwrap().unwrap();
+            let tokenizer_path = format!(
+                "{}/snapshots/{}/tokenizer.json",
+                model_info.metadata.cache.path, model_info.metadata.cache.revision
+            );
+
+            let tokenizer = match Tokenizer::from_file(&tokenizer_path) {
+                Ok(tok) => tok,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Could not load tokenizer from {}: {}.",
+                        tokenizer_path, e
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            // Load inference backend
+            // TODO: Replace MockEngine with real backend that loads model files
+            // Real backend will use: registry.get_model(&args.model)?.metadata.cache.path
+            let backend = MockEngine::new();
+
+            // Create engine: cheap send-side handle + runner that owns the scheduler
+            let (handle, runner) = engine(backend, tokenizer, args.model.clone());
+
+            // Spawn the runner's event loop; the handle submits work via events
+            tokio::spawn(runner.serve());
+
+            // Start interactive chat
+            if let Err(e) = chat::interactive_chat(&handle, &args.model).await {
+                eprintln!("❌ Chat error: {}", e);
+                std::process::exit(1);
             }
         }
 
