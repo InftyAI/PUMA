@@ -45,25 +45,33 @@ Events transform states: `Event + OldState → NewState`
 
 Invalid transitions return `Error::InvalidTransition`.
 
-### FSM Integration with Scheduler
+### FSM Integration with SequenceManager
 
-The FSM logic is **integrated into the Scheduler** to solve the ownership boundary problem:
+The FSM logic lives in the **`SequenceManager`** (the *mechanism* layer), which
+owns `BlockManager`. The `Scheduler` (the *policy* layer) drives it with events
+and never touches `BlockManager` or transition logic directly.
 
-**Public API:** `Scheduler::transition(state, event)` - Event-based abstraction
+**Public API:** `SequenceManager::advance(seq_id, event)` - Event-based abstraction
 - Single entry point for all state transitions
 - Easy to add logging, metrics, debugging
-- Event replay capability for testing
+- Backs up state and restores it on error (no block leaks)
 
-**Internal Implementation:** Private `transition_*()` methods
+**Internal Implementation:** Private `transition()` / `transition_*()` methods
 - Type-safe helpers that enforce correct state types
 - Direct access to `self.block_manager` - no parameter passing
-- Called by `transition()` after event dispatching
+- Called by `advance()` after looking up the current state
 
 ```rust
-impl Scheduler {
-    pub fn transition(&mut self, state: SequenceState, event: Event) -> Result<SequenceState> {
+impl SequenceManager {
+    pub fn advance(&mut self, seq_id: SequenceId, event: Event) -> Result<&SequenceState> {
+        // Remove current state, run transition(), reinsert on success
+        // or restore the backup on error.
+    }
+
+    fn transition(&mut self, state: SequenceState, event: Event) -> Result<SequenceState> {
+        let seq_id = state.seq_id();
         match (state, event) {
-            (SequenceState::Waiting(s), Event::Schedule{..}) => 
+            (SequenceState::Waiting(s), Event::Schedule{..}) =>
                 self.transition_schedule(s),
             // ... dispatches to internal methods
         }
@@ -100,21 +108,23 @@ impl Scheduler {
     └─ CompleteEvent → Finished
 ```
 
-## Scheduler Integration
+## Scheduler / SequenceManager Integration
 
-The Scheduler owns the FSM and manages all state transitions.
+The `SequenceManager` owns the FSM and executes all state transitions; the
+`Scheduler` owns the queues/batches and decides *which* events to fire.
 
-**Implementation:** `src/scheduler/core.rs`
+**Implementation:** `src/sequence_manager/mod.rs` (mechanism),
+`src/scheduler/core.rs` (policy)
 
 **Key features:**
 - Synchronous API (LLMEngine handles async coordination)
-- Maintains `HashMap<SequenceId, SequenceState>`
-- Owns `BlockManager` directly - no parameter passing needed
+- `SequenceManager` maintains `HashMap<SequenceId, SequenceState>`
+- `SequenceManager` owns `BlockManager` directly - no parameter passing needed
 - Clones state before transitions (prevents loss on failure)
 - Restores backup on error (no block leaks)
-- Event-based `apply()` method for maintainability
+- Event-based `advance()` method for maintainability
 
-**Tests:** `cargo test --lib` (120 tests passing)
+**Tests:** `cargo test --lib`
 
 ## Arc Optimization
 

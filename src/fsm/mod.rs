@@ -1,8 +1,10 @@
 //! FSM - Finite State Machine for sequence lifecycle
 //!
-//! This module defines states and events for the sequence state machine.
-//! The actual transition logic is implemented in `Scheduler::transition()` and
-//! private `Scheduler::transition_*()` methods.
+//! This module defines the *data* of the state machine: the states and the
+//! events that trigger transitions. The actual transition logic lives in
+//! [`SequenceManager`](crate::sequence_manager::SequenceManager) — its private
+//! `transition()`/`transition_*()` methods compute the next state and
+//! allocate/free blocks along the way.
 //!
 //! # Architecture
 //!
@@ -11,26 +13,24 @@
 //!
 //! # Usage
 //!
-//! States and events are used by the Scheduler:
+//! The `Scheduler` (policy) drives the `SequenceManager` (mechanism) with these
+//! events; it never touches `BlockManager` or transition logic directly:
 //!
 //! ```rust,ignore
-//! use crate::fsm::{Event, SequenceState};
-//! use crate::scheduler::Scheduler;
+//! use crate::fsm::Event;
 //!
-//! let mut scheduler = Scheduler::new(...);
-//! let state = SequenceState::Waiting(WaitingState { ... });
-//! let event = Event::Schedule { tokens_per_block: 16 };
-//!
-//! // Scheduler owns BlockManager and performs transitions
-//! let new_state = scheduler.transition(state, event)?;
+//! // seq_manager: SequenceManager, owned by the scheduler
+//! seq_manager.create(seq_id, token_ids, max_tokens)?;
+//! let new_state = seq_manager.advance(seq_id, Event::Schedule { tokens_per_block: 16 })?;
 //! ```
 //!
 //! # Design Rationale
 //!
-//! FSM logic is **inside Scheduler** rather than a separate `fsm::apply()` because:
-//! - Scheduler owns `BlockManager` - no need to pass as parameter
-//! - Direct access to scheduler context (tokens_per_block, etc.)
-//! - Event-based `transition()` method provides single entry point for logging/metrics
+//! Transition logic lives **inside `SequenceManager`** rather than a free
+//! `fsm::apply()` because:
+//! - The manager owns `BlockManager` - no need to pass it as a parameter
+//! - Direct access to context (tokens_per_block, etc.)
+//! - Event-based `advance()` gives a single entry point for logging/metrics
 //! - Type-safe internal `transition_*()` methods enforce correct state types
 //!
 //! See `docs/fsm_architecture.md` for detailed documentation.

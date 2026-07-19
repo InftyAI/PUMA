@@ -7,19 +7,20 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-/// Scheduler - memory and batch management (synchronous API)
+/// Scheduler - batch and scheduling policy (synchronous API)
 ///
 /// Architecture
 /// - Pure synchronous methods (no async, no loop)
 /// - LLMEngine calls: add_request() → schedule() → process_outputs()
-/// - Owns BlockManager and performs FSM transitions directly
+/// - Drives a `SequenceManager` (which owns memory and executes FSM
+///   transitions) via `create`/`advance`/`fork`
 ///
 /// Responsibilities:
-/// - Owns BlockManager (memory allocation)
-/// - Owns sequence state storage (FSM states)
+/// - This is the *policy* layer; the `SequenceManager` is the *mechanism*
+///   layer that owns `BlockManager` and the FSM transition logic
 /// - Manages batches (waiting/prefill/decode)
 /// - Scheduling policy (what to schedule when)
-/// - FSM transitions (internal methods with direct BlockManager access)
+/// - Owns client response channels and delivers results/errors
 pub struct Scheduler {
     /// Owns sequence state + block memory and executes FSM transitions.
     sequences: SequenceManager,
@@ -140,7 +141,12 @@ impl Scheduler {
     /// The reason is passed through to the FSM `Abort` event, so callers (user
     /// cancel, backend failure, …) describe *why* the sequence ended.
     pub fn abort_request(&mut self, seq_id: SequenceId, reason: String) {
-        match self.sequences.advance(seq_id, Event::Abort { reason }) {
+        match self.sequences.advance(
+            seq_id,
+            Event::Abort {
+                reason: reason.clone(),
+            },
+        ) {
             Ok(_) => {
                 info!("Aborted sequence {:?}", seq_id);
 
@@ -148,6 +154,13 @@ impl Scheduler {
                 self.waiting_queue.retain(|&id| id != seq_id);
                 self.prefill_batch.retain(|&id| id != seq_id);
                 self.decode_batch.retain(|&id| id != seq_id);
+
+                // Resolve the client channel so waiters unblock and the entry
+                // is not leaked. Streaming callers see the error and close;
+                // single callers get an `Err` instead of hanging forever.
+                if let Some(response_tx) = self.response_channels.remove(&seq_id) {
+                    self.send_error(response_tx, Error::Aborted(reason));
+                }
             }
             Err(e) => {
                 warn!("Failed to abort {:?}: {:?}", seq_id, e);
@@ -452,6 +465,44 @@ mod tests {
             Some(SequenceState::Aborted(_))
         ));
         assert_eq!(scheduler.waiting_queue.len(), 0);
+    }
+
+    #[test]
+    fn test_abort_resolves_single_channel_and_removes_entry() {
+        let mut scheduler = create_test_scheduler();
+
+        // Keep the receiver so we can observe what the client sees.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, ResponseSender::Single(tx));
+        assert_eq!(scheduler.response_channels.len(), 1);
+
+        scheduler.abort_request(SequenceId(1), "User cancelled".to_string());
+
+        // The waiter is unblocked with an Aborted error (not left hanging)...
+        match rx.blocking_recv() {
+            Ok(Err(Error::Aborted(reason))) => assert_eq!(reason, "User cancelled"),
+            other => panic!("expected Ok(Err(Aborted)), got {:?}", other),
+        }
+        // ...and the channel entry is not leaked.
+        assert!(scheduler.response_channels.is_empty());
+    }
+
+    #[test]
+    fn test_abort_closes_streaming_channel() {
+        let mut scheduler = create_test_scheduler();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        scheduler.add_request(SequenceId(1), vec![0; 100], 200, ResponseSender::Stream(tx));
+
+        scheduler.abort_request(SequenceId(1), "boom".to_string());
+
+        // Streaming client receives the error, then the channel closes.
+        match rx.blocking_recv() {
+            Some(Err(Error::Aborted(reason))) => assert_eq!(reason, "boom"),
+            other => panic!("expected Some(Err(Aborted)), got {:?}", other),
+        }
+        assert!(rx.blocking_recv().is_none(), "channel should be closed");
+        assert!(scheduler.response_channels.is_empty());
     }
 
     #[test]

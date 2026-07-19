@@ -103,6 +103,9 @@ pub enum Error {
 
     #[error("Invalid state transition: {0}")]
     InvalidTransition(&'static str),
+
+    #[error("Sequence aborted: {0}")]
+    Aborted(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

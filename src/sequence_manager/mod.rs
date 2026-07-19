@@ -34,6 +34,7 @@ pub struct SequenceManager {
 
 impl SequenceManager {
     pub fn new(block_manager: BlockManager, tokens_per_block: usize) -> Self {
+        assert!(tokens_per_block > 0, "tokens_per_block must be > 0");
         Self {
             block_manager,
             sequences: HashMap::new(),
@@ -155,12 +156,21 @@ impl SequenceManager {
 
         if let SequenceState::Decoding(s) = parent_state {
             // Copy-on-write: increment ref counts on shared blocks.
+            let mut reffed = Vec::with_capacity(s.blocks.len());
             for &block_id in s.blocks.iter() {
                 if let Err(e) = self.block_manager.add_ref(block_id) {
                     warn!("Failed to fork {:?}: {:?}", parent_id, e);
+                    // Roll back the refs we already bumped so those blocks can
+                    // still return to the free pool later (otherwise leak).
+                    for &done in &reffed {
+                        if let Err(e) = self.block_manager.free(done) {
+                            warn!("Failed to roll back ref for {:?}: {:?}", done, e);
+                        }
+                    }
                     self.sequences.insert(parent_id, backup);
                     return Err(e);
                 }
+                reffed.push(block_id);
             }
 
             let child = DecodingState {
@@ -697,6 +707,54 @@ mod tests {
         // Parent is restored and child was never inserted.
         assert!(mgr.contains(parent));
         assert!(!mgr.contains(SequenceId(2)));
+    }
+
+    /// Sum of free blocks across all block types.
+    fn free_blocks(mgr: &SequenceManager) -> usize {
+        mgr.block_stats().values().map(|s| s.free_blocks).sum()
+    }
+
+    #[test]
+    fn test_fork_rolls_back_refs_on_partial_failure() {
+        let mut mgr = manager(10, 4);
+        let parent = SequenceId(1);
+        mgr.create(parent, vec![1, 2, 3, 4], 20).unwrap();
+        mgr.advance(parent, schedule_event()).unwrap();
+        mgr.advance(parent, append(4)).unwrap(); // Decoding, holds 1 real block
+
+        let real_block = mgr.blocks(parent).unwrap()[0];
+
+        // Inject a bogus second block so add_ref succeeds on the real block and
+        // then fails on the bogus one, exercising the mid-loop rollback path.
+        match mgr.sequences.get_mut(&parent) {
+            Some(SequenceState::Decoding(s)) => {
+                s.blocks = Arc::new(vec![real_block, BlockId(9999)]);
+            }
+            _ => panic!("parent should be Decoding"),
+        }
+
+        let err = mgr.fork(parent, SequenceId(2)).unwrap_err();
+        assert!(matches!(err, Error::InvalidBlockId(_)));
+        // Child was never created and the parent is restored.
+        assert!(!mgr.contains(SequenceId(2)));
+        assert!(mgr.contains(parent));
+
+        // The real block's ref was rolled back to 1 (parent only), so aborting
+        // the parent drops it to 0 and returns it to the free pool. Without the
+        // rollback its ref would be 2 and it would leak (never pooled).
+        let free_before = free_blocks(&mgr);
+        mgr.advance(
+            parent,
+            Event::Abort {
+                reason: "x".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            free_blocks(&mgr),
+            free_before + 1,
+            "real block should return to the free pool after abort"
+        );
     }
 
     #[test]

@@ -234,17 +234,21 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
             completion_ids.push(token_id);
 
             let decoded = self.decode_tokens(&completion_ids).unwrap_or_default();
-            // A trailing replacement char means an incomplete multi-byte
-            // character; wait for the next token before emitting more.
-            if decoded.ends_with('\u{FFFD}') {
-                continue;
-            }
-            if decoded.len() > sent_len {
-                let delta = decoded[sent_len..].to_string();
+            if let Some(delta) = stream_delta(&decoded, sent_len) {
                 sent_len = decoded.len();
-                self.scheduler.send_chunk(seq_id, delta);
+                self.scheduler.send_chunk(seq_id, delta.to_string());
             }
         }
+
+        // Flush any tail held back by the incomplete-multibyte guard: if the
+        // stream ended while the last decode still had bytes beyond `sent_len`
+        // (e.g. a trailing `�` from a truncated multi-byte char), emit them now
+        // so the final output is never silently dropped.
+        let decoded = self.decode_tokens(&completion_ids).unwrap_or_default();
+        if let Some(delta) = stream_flush(&decoded, sent_len) {
+            self.scheduler.send_chunk(seq_id, delta.to_string());
+        }
+
         let num_completion = completion_ids.len();
 
         // Advance FSM state (prefill → decode → finished) so blocks are freed,
@@ -302,6 +306,31 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
             // 4. Small yield to prevent busy loop
             tokio::task::yield_now().await;
         }
+    }
+}
+
+/// Incremental streaming detokenization: given the full text decoded from the
+/// completion prefix so far and how many bytes were already sent, return the
+/// next delta to emit, or `None` to hold output back.
+///
+/// A trailing replacement char (`�`) means the last multi-byte character is
+/// still incomplete, so we wait for the next token rather than emit a partial
+/// char. This mirrors the scheme vLLM and TGI use.
+fn stream_delta(decoded: &str, sent_len: usize) -> Option<&str> {
+    if decoded.ends_with('\u{FFFD}') {
+        return None;
+    }
+    stream_flush(decoded, sent_len)
+}
+
+/// Final flush: emit whatever bytes remain past `sent_len`, including any tail
+/// the `�` guard in [`stream_delta`] held back when the stream ended. Returns
+/// `None` when nothing is left to send.
+fn stream_flush(decoded: &str, sent_len: usize) -> Option<&str> {
+    if decoded.len() > sent_len {
+        Some(&decoded[sent_len..])
+    } else {
+        None
     }
 }
 
@@ -367,5 +396,37 @@ mod tests {
 
         let result = handle.generate("test-model", "Hello world", 100, 0.7).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stream_delta_emits_complete_suffix() {
+        // Nothing sent yet -> emit the whole thing.
+        assert_eq!(stream_delta("hello", 0), Some("hello"));
+        // Some already sent -> emit only the new bytes.
+        assert_eq!(stream_delta("hello world", 5), Some(" world"));
+        // Nothing new -> hold.
+        assert_eq!(stream_delta("hello", 5), None);
+    }
+
+    #[test]
+    fn test_stream_delta_holds_incomplete_multibyte() {
+        // Decode ended on a replacement char: the multi-byte char is not yet
+        // complete, so we must not emit anything this step.
+        assert_eq!(stream_delta("hi\u{FFFD}", 2), None);
+    }
+
+    #[test]
+    fn test_stream_flush_emits_held_back_tail() {
+        // Simulates the bug scenario: the loop held back a trailing `�` and the
+        // stream then ended. The flush must still emit those bytes rather than
+        // drop them.
+        let decoded = "hi\u{FFFD}";
+        assert_eq!(stream_delta(decoded, 2), None); // loop held it back
+        assert_eq!(stream_flush(decoded, 2), Some("\u{FFFD}")); // flush emits it
+    }
+
+    #[test]
+    fn test_stream_flush_none_when_all_sent() {
+        assert_eq!(stream_flush("done", 4), None);
     }
 }
