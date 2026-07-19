@@ -97,25 +97,54 @@ struct ServeArgs {
 /// the two never drift.
 #[derive(Parser, Clone)]
 struct EngineArgs {
-    /// Total KV-cache memory pool, in bytes
-    #[arg(long, default_value_t = EngineConfig::DEFAULT_MEMORY_POOL_BYTES)]
+    /// Total KV-cache memory pool, in bytes (must be > 0)
+    #[arg(
+        long,
+        default_value_t = EngineConfig::DEFAULT_MEMORY_POOL_BYTES,
+        value_parser = parse_positive_usize
+    )]
     memory_pool_bytes: usize,
 
-    /// Size of a single KV block, in bytes
-    #[arg(long, default_value_t = EngineConfig::DEFAULT_BLOCK_SIZE_BYTES)]
+    /// Size of a single KV block, in bytes (must be > 0)
+    #[arg(
+        long,
+        default_value_t = EngineConfig::DEFAULT_BLOCK_SIZE_BYTES,
+        value_parser = parse_positive_usize
+    )]
     block_size_bytes: usize,
 
-    /// Number of tokens whose KV state fits in one block
-    #[arg(long, default_value_t = EngineConfig::DEFAULT_TOKENS_PER_BLOCK)]
+    /// Number of tokens whose KV state fits in one block (must be > 0)
+    #[arg(
+        long,
+        default_value_t = EngineConfig::DEFAULT_TOKENS_PER_BLOCK,
+        value_parser = parse_positive_usize
+    )]
     tokens_per_block: usize,
 
-    /// Maximum number of sequences batched together per step
-    #[arg(long, default_value_t = EngineConfig::DEFAULT_MAX_BATCH_SIZE)]
+    /// Maximum number of sequences batched together per step (must be > 0)
+    #[arg(
+        long,
+        default_value_t = EngineConfig::DEFAULT_MAX_BATCH_SIZE,
+        value_parser = parse_positive_usize
+    )]
     max_batch_size: usize,
 
     /// Completion-token budget when a request omits max_tokens
     #[arg(long, default_value_t = EngineConfig::DEFAULT_MAX_TOKENS)]
     default_max_tokens: usize,
+}
+
+/// Parse a `usize` argument and reject `0`, since these engine dimensions are
+/// used as divisors / capacities that must be positive.
+fn parse_positive_usize(s: &str) -> Result<usize, String> {
+    let value: usize = s
+        .parse()
+        .map_err(|_| format!("`{s}` is not a valid number"))?;
+    if value == 0 {
+        Err("value must be greater than 0".to_string())
+    } else {
+        Ok(value)
+    }
 }
 
 impl EngineArgs {
@@ -679,5 +708,38 @@ mod tests {
         assert_eq!(cfg.tokens_per_block, 32);
         assert_eq!(cfg.max_batch_size, 8);
         assert_eq!(cfg.default_max_tokens, 256);
+    }
+
+    #[test]
+    fn test_engine_args_reject_zero() {
+        use clap::CommandFactory;
+        let app = Cli::command();
+        // A zero for a must-be-positive dimension is rejected at parse time.
+        let result = app.clone().try_get_matches_from(vec![
+            "puma",
+            "serve",
+            "test/model",
+            "--tokens-per-block",
+            "0",
+        ]);
+        assert!(result.is_err());
+
+        // A non-numeric value is also rejected.
+        let result = app.try_get_matches_from(vec![
+            "puma",
+            "serve",
+            "test/model",
+            "--max-batch-size",
+            "abc",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_positive_usize() {
+        assert_eq!(parse_positive_usize("16"), Ok(16));
+        assert!(parse_positive_usize("0").is_err());
+        assert!(parse_positive_usize("-1").is_err());
+        assert!(parse_positive_usize("abc").is_err());
     }
 }
