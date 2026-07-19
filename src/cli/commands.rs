@@ -291,8 +291,12 @@ pub async fn run(cli: Cli) {
             let backend = MockEngine::new();
 
             // Create engine: cheap send-side handle + runner that owns the scheduler
-            let (handle, runner) =
-                engine(backend, tokenizer, args.model.clone(), args.engine.to_config());
+            let (handle, runner) = engine(
+                backend,
+                tokenizer,
+                args.model.clone(),
+                args.engine.to_config(),
+            );
 
             // Spawn the runner's event loop; the handle submits work via events
             tokio::spawn(runner.serve());
@@ -356,9 +360,13 @@ pub async fn run(cli: Cli) {
                 }
             }
 
-            if let Err(e) =
-                crate::cli::serve::execute(&args.host, args.port, &args.model, args.engine.to_config())
-                    .await
+            if let Err(e) = crate::cli::serve::execute(
+                &args.host,
+                args.port,
+                &args.model,
+                args.engine.to_config(),
+            )
+            .await
             {
                 eprintln!("Error starting server: {}", e);
                 std::process::exit(1);
