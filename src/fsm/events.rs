@@ -1,5 +1,5 @@
 use super::states::FinishReason;
-use crate::block_manager::types::{SequenceId, TokenId};
+use crate::block_manager::types::TokenId;
 
 /// FSM Events - pure data that triggers state transitions
 ///
@@ -31,9 +31,6 @@ pub enum Event {
 
     /// Resume a preempted sequence
     Resume,
-
-    /// Fork a sequence (copy-on-write)
-    Fork { child_id: SequenceId },
 
     /// Abort a sequence with error
     Abort { reason: String },

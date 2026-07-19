@@ -35,15 +35,19 @@ Events transform states: `Event + OldState → NewState`
 **Implementation:** `src/fsm/events.rs`
 
 **Events:**
+- `Create` - Empty → Waiting (birth a new sequence)
 - `Schedule` - Waiting → Prefilling (allocate blocks)
 - `AppendTokens` - Prefilling → Decoding or Decoding → Decoding/Finished
-- `Fork` - Decoding → (Decoding, Decoding) for beam search
 - `Preempt` - Decoding → Preempted (free blocks on OOM)
 - `Resume` - Preempted → Waiting (re-queue)
 - `Complete` - * → Finished (free blocks)
 - `Abort` - * → Aborted (cleanup)
 
 Invalid transitions return `Error::InvalidTransition`.
+
+Forking (Decoding → (Decoding, Decoding) for beam search) is **not** an event:
+it is a dedicated `SequenceManager::fork` method, since it produces a second
+sequence rather than transforming one state into another.
 
 ### FSM Integration with SequenceManager
 
@@ -96,7 +100,7 @@ impl SequenceManager {
     │                   │   ├─ Decoding (more tokens)
     │                   │   └─ Finished (max_tokens)
     │                   │
-    │                   ├─→ ForkEvent (beam search)
+    │                   ├─→ fork() method (beam search, not an event)
     │                   │   ├─ Parent: Decoding
     │                   │   └─ Child: Decoding
     │                   │

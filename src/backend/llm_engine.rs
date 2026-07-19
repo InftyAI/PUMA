@@ -232,6 +232,8 @@ impl<B: Backend + Clone + 'static> EngineRunner<B> {
         let mut sent_len = 0usize; // bytes of the decoded completion already sent
         while let Some(token_id) = stream.next().await {
             completion_ids.push(token_id);
+            // Advance decoding state and allocate KV blocks as needed.
+            self.scheduler.append_tokens(seq_id, 1);
 
             let decoded = self.decode_tokens(&completion_ids).unwrap_or_default();
             if let Some(delta) = stream_delta(&decoded, sent_len) {
