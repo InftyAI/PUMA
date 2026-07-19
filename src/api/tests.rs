@@ -13,8 +13,8 @@ use tempfile::TempDir;
 use tower::util::ServiceExt; // for `oneshot` and `ready`
 
 use super::routes::create_router;
-use crate::backend::engine;
 use crate::backend::mock::MockEngine;
+use crate::backend::{engine, EngineConfig};
 use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
@@ -25,6 +25,7 @@ fn create_test_app() -> (axum::Router, TempDir) {
         MockEngine::new(),
         create_test_tokenizer(),
         "test-model".to_string(),
+        EngineConfig::default(),
     );
     tokio::spawn(runner.serve());
 

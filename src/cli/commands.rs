@@ -4,8 +4,8 @@ use prettytable::{format, row, Table};
 
 use tokenizers::Tokenizer;
 
-use crate::backend::engine;
 use crate::backend::mock::MockEngine;
+use crate::backend::{engine, EngineConfig};
 use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
 use crate::registry::model_registry::ModelRegistry;
@@ -69,6 +69,9 @@ struct RunArgs {
         default_value = "huggingface"
     )]
     provider: Provider,
+
+    #[command(flatten)]
+    engine: EngineArgs,
 }
 
 #[derive(Parser)]
@@ -83,6 +86,48 @@ struct ServeArgs {
     /// Port to listen on
     #[arg(short, long, default_value = "8000")]
     port: u16,
+
+    #[command(flatten)]
+    engine: EngineArgs,
+}
+
+/// Engine tuning flags shared by `run` and `serve`.
+///
+/// Defaults mirror [`EngineConfig::default`] via its `DEFAULT_*` constants, so
+/// the two never drift.
+#[derive(Parser, Clone)]
+struct EngineArgs {
+    /// Total KV-cache memory pool, in bytes
+    #[arg(long, default_value_t = EngineConfig::DEFAULT_MEMORY_POOL_BYTES)]
+    memory_pool_bytes: usize,
+
+    /// Size of a single KV block, in bytes
+    #[arg(long, default_value_t = EngineConfig::DEFAULT_BLOCK_SIZE_BYTES)]
+    block_size_bytes: usize,
+
+    /// Number of tokens whose KV state fits in one block
+    #[arg(long, default_value_t = EngineConfig::DEFAULT_TOKENS_PER_BLOCK)]
+    tokens_per_block: usize,
+
+    /// Maximum number of sequences batched together per step
+    #[arg(long, default_value_t = EngineConfig::DEFAULT_MAX_BATCH_SIZE)]
+    max_batch_size: usize,
+
+    /// Completion-token budget when a request omits max_tokens
+    #[arg(long, default_value_t = EngineConfig::DEFAULT_MAX_TOKENS)]
+    default_max_tokens: usize,
+}
+
+impl EngineArgs {
+    fn to_config(&self) -> EngineConfig {
+        EngineConfig {
+            memory_pool_bytes: self.memory_pool_bytes,
+            block_size_bytes: self.block_size_bytes,
+            tokens_per_block: self.tokens_per_block,
+            max_batch_size: self.max_batch_size,
+            default_max_tokens: self.default_max_tokens,
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -246,7 +291,8 @@ pub async fn run(cli: Cli) {
             let backend = MockEngine::new();
 
             // Create engine: cheap send-side handle + runner that owns the scheduler
-            let (handle, runner) = engine(backend, tokenizer, args.model.clone());
+            let (handle, runner) =
+                engine(backend, tokenizer, args.model.clone(), args.engine.to_config());
 
             // Spawn the runner's event loop; the handle submits work via events
             tokio::spawn(runner.serve());
@@ -310,7 +356,10 @@ pub async fn run(cli: Cli) {
                 }
             }
 
-            if let Err(e) = crate::cli::serve::execute(&args.host, args.port, &args.model).await {
+            if let Err(e) =
+                crate::cli::serve::execute(&args.host, args.port, &args.model, args.engine.to_config())
+                    .await
+            {
                 eprintln!("Error starting server: {}", e);
                 std::process::exit(1);
             }
@@ -576,5 +625,51 @@ mod tests {
         // This should succeed with ms alias
         let result = app.try_get_matches_from(vec!["puma", "run", "test/model", "-p", "ms"]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_engine_args_default_to_config() {
+        use clap::Parser;
+        let cli = Cli::parse_from(vec!["puma", "serve", "test/model"]);
+        let Commands::SERVE(args) = cli.command else {
+            panic!("expected SERVE");
+        };
+        let cfg = args.engine.to_config();
+        // With no flags, the config matches EngineConfig::default().
+        let default = EngineConfig::default();
+        assert_eq!(cfg.memory_pool_bytes, default.memory_pool_bytes);
+        assert_eq!(cfg.block_size_bytes, default.block_size_bytes);
+        assert_eq!(cfg.tokens_per_block, default.tokens_per_block);
+        assert_eq!(cfg.max_batch_size, default.max_batch_size);
+        assert_eq!(cfg.default_max_tokens, default.default_max_tokens);
+    }
+
+    #[test]
+    fn test_engine_args_overrides_flow_to_config() {
+        use clap::Parser;
+        let cli = Cli::parse_from(vec![
+            "puma",
+            "run",
+            "test/model",
+            "--block-size-bytes",
+            "1024",
+            "--tokens-per-block",
+            "32",
+            "--max-batch-size",
+            "8",
+            "--default-max-tokens",
+            "256",
+            "--memory-pool-bytes",
+            "2048",
+        ]);
+        let Commands::RUN(args) = cli.command else {
+            panic!("expected RUN");
+        };
+        let cfg = args.engine.to_config();
+        assert_eq!(cfg.memory_pool_bytes, 2048);
+        assert_eq!(cfg.block_size_bytes, 1024);
+        assert_eq!(cfg.tokens_per_block, 32);
+        assert_eq!(cfg.max_batch_size, 8);
+        assert_eq!(cfg.default_max_tokens, 256);
     }
 }
