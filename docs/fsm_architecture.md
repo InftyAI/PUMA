@@ -1,6 +1,8 @@
 # FSM Architecture for PUMA
 
-Finite State Machine pattern for sequence lifecycle management, integrated into the Scheduler.
+Finite State Machine pattern for sequence lifecycle management. The FSM states
+and events are defined in `src/fsm/`; the transition logic lives in the
+`SequenceManager` (`src/sequence_manager/mod.rs`), which the `Scheduler` drives.
 
 ## Core Concepts
 
@@ -11,6 +13,7 @@ Each sequence is an independent state machine. Multiple sequences can be in diff
 **Implementation:** `src/fsm/states.rs`
 
 **States:**
+- `Empty` - Pre-birth placeholder; the `from` state of `Create`, never persisted
 - `Waiting` - In queue, no resources allocated
 - `Scheduling` - Being scheduled (transitional)
 - `Prefilling` - Processing prompt
@@ -85,6 +88,7 @@ impl SequenceManager {
         // Direct access to self.block_manager, self.tokens_per_block
     }
 }
+```
 
 ## State Diagram
 
@@ -180,9 +184,9 @@ All state transitions are wrapped with backup/restore:
 PUMA uses a two-level event system (inspired by TokenSpeed):
 
 **Level 1: FSM Events (Internal)** - `src/fsm/events.rs`
-- Created by Scheduler internally
+- Created by the Scheduler internally
 - Include scheduler context (tokens_per_block, etc.)
-- Used with `Scheduler::apply(state, event)`
+- Applied via `SequenceManager::advance(seq_id, event)`
 - Examples: `Event::Schedule`, `Event::AppendTokens`
 
 **Level 2: Scheduler Events (External)** - `src/scheduler/events.rs`
@@ -196,45 +200,40 @@ PUMA uses a two-level event system (inspired by TokenSpeed):
 - They don't know scheduler policies (tokens_per_block)
 - FSM events require scheduler context
 
-See `ARCHITECTURE.md` for detailed explanation and flow diagrams.
-
 ## Key Files
 
 - `src/fsm/states.rs` - State definitions and helper methods
 - `src/fsm/events.rs` - FSM event enum (internal transitions)
-- `src/scheduler/core.rs` - Scheduler with integrated FSM (`apply()` method)
+- `src/sequence_manager/mod.rs` - Owns memory + FSM transition logic (`advance()`)
+- `src/scheduler/core.rs` - Scheduling policy that drives the SequenceManager
 - `src/scheduler/events.rs` - External scheduler events
 - `src/backend/llm_engine.rs` - Event coordinator
-- `ARCHITECTURE.md` - Comprehensive architecture documentation
 
 ## Usage Example
 
 ```rust
-// External component sends high-level event
+// External component sends a high-level event
 scheduler_tx.send(SchedulerEvent::AddRequest {
-    seq_id: 1,
-    prompt_tokens: 10,
+    seq_id: SequenceId(1),
+    token_ids: vec![/* tokenized prompt */],
     max_tokens: 100,
+    response_tx, // channel the result is delivered on
 })?;
 
-// Scheduler translates to FSM events internally
+// The Scheduler translates it to an FSM event and drives the SequenceManager,
+// which owns BlockManager and performs the transition.
 impl Scheduler {
-    pub fn schedule(&mut self) -> bool {
-        // Pop from waiting queue
-        let state = self.sequences.remove(&seq_id).unwrap();
-        
-        // Create FSM event with scheduler context
-        let event = Event::Schedule {
-            tokens_per_block: self.tokens_per_block,
-        };
-        
-        // Perform transition (direct access to self.block_manager)
-        match self.transition(state, event) {
-            Ok(new_state) => {
-                self.sequences.insert(seq_id, new_state);
-                self.prefill_batch.push(seq_id);
+    fn schedule_prefill(&mut self) {
+        while let Some(seq_id) = self.waiting_queue.pop_front() {
+            // Build the FSM event with scheduler context
+            let event = Event::Schedule {
+                tokens_per_block: self.tokens_per_block,
+            };
+
+            match self.sequences.advance(seq_id, event) {
+                Ok(_) => self.prefill_batch.push(seq_id),
+                Err(e) => { /* apply OOM / queueing policy */ }
             }
-            Err(e) => { /* handle error */ }
         }
     }
 }
