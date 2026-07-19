@@ -8,6 +8,7 @@ pub mod downloader;
 pub mod fsm;
 pub mod registry;
 pub mod scheduler;
+pub mod sequence_manager;
 pub mod storage;
 pub mod system;
 pub mod utils;

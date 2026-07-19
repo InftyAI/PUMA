@@ -8,6 +8,7 @@ mod downloader;
 mod fsm;
 mod registry;
 mod scheduler;
+mod sequence_manager;
 mod storage;
 mod system;
 mod utils;

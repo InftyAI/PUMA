@@ -1,10 +1,8 @@
 use super::events::{ResponseSender, SchedulerEvent, SchedulerEventReceiver, SchedulerStats};
+use crate::sequence_manager::SequenceManager;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::*;
-use crate::fsm::{
-    AbortedState, DecodingState, Event, FinishReason, FinishedState, PreemptedState,
-    PrefillingState, SequenceState, WaitingState,
-};
+use crate::fsm::{Event, FinishReason, SequenceState};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -23,11 +21,8 @@ use tracing::{debug, info, warn};
 /// - Scheduling policy (what to schedule when)
 /// - FSM transitions (internal methods with direct BlockManager access)
 pub struct Scheduler {
-    /// Block manager for memory allocation
-    block_manager: BlockManager,
-
-    /// All sequences and their states
-    sequences: HashMap<SequenceId, SequenceState>,
+    /// Owns sequence state + block memory and executes FSM transitions.
+    sequences: SequenceManager,
 
     /// Response channels to send results back to clients (supports streaming)
     response_channels: HashMap<SequenceId, ResponseSender>,
@@ -60,8 +55,7 @@ impl Scheduler {
         tokens_per_block: usize,
     ) -> Self {
         Self {
-            block_manager,
-            sequences: HashMap::new(),
+            sequences: SequenceManager::new(block_manager, tokens_per_block),
             response_channels: HashMap::new(),
             waiting_queue: VecDeque::new(),
             prefill_batch: Vec::new(),
@@ -117,7 +111,7 @@ impl Scheduler {
         );
 
         // Check duplicate
-        if self.sequences.contains_key(&seq_id) {
+        if self.sequences.contains(seq_id) {
             warn!("Duplicate seq_id {:?}", seq_id);
             self.send_error(
                 response_tx,
@@ -129,14 +123,9 @@ impl Scheduler {
         // Store response channel
         self.response_channels.insert(seq_id, response_tx);
 
-        // Birth the sequence via an FSM transition: Empty → Waiting.
-        let event = Event::Create {
-            token_ids,
-            max_tokens,
-        };
-        match self.transition(seq_id, SequenceState::Empty, event) {
-            Ok(new_state) => {
-                self.sequences.insert(seq_id, new_state);
+        // Birth the sequence (Empty → Waiting) inside the sequence manager.
+        match self.sequences.create(seq_id, token_ids, max_tokens) {
+            Ok(()) => {
                 self.waiting_queue.push_back(seq_id);
             }
             Err(e) => {
@@ -151,18 +140,9 @@ impl Scheduler {
     /// The reason is passed through to the FSM `Abort` event, so callers (user
     /// cancel, backend failure, …) describe *why* the sequence ended.
     pub fn abort_request(&mut self, seq_id: SequenceId, reason: String) {
-        let state = match self.sequences.remove(&seq_id) {
-            Some(s) => s,
-            None => {
-                warn!("Cannot abort - sequence {:?} not found", seq_id);
-                return;
-            }
-        };
-
-        match self.transition(seq_id, state, Event::Abort { reason }) {
-            Ok(new_state) => {
+        match self.sequences.advance(seq_id, Event::Abort { reason }) {
+            Ok(_) => {
                 info!("Aborted sequence {:?}", seq_id);
-                self.sequences.insert(seq_id, new_state);
 
                 // Remove from queues/batches
                 self.waiting_queue.retain(|&id| id != seq_id);
@@ -199,7 +179,7 @@ impl Scheduler {
         let batch = std::mem::take(&mut self.prefill_batch);
         batch
             .into_iter()
-            .filter_map(|seq_id| match self.sequences.get(&seq_id) {
+            .filter_map(|seq_id| match self.sequences.get(seq_id) {
                 Some(SequenceState::Prefilling(s)) => {
                     let streaming = self
                         .response_channels
@@ -215,52 +195,29 @@ impl Scheduler {
     // ===== Internal State Management (called by LLMEngine after inference) =====
 
     pub fn append_tokens(&mut self, seq_id: SequenceId, num_tokens: usize) {
-        let state = match self.sequences.remove(&seq_id) {
-            Some(s) => s,
-            None => {
-                warn!("Sequence {:?} not found", seq_id);
-                return;
-            }
-        };
-
-        let backup = state.clone();
         let event = Event::AppendTokens {
             num_tokens,
             tokens_per_block: self.tokens_per_block,
         };
 
-        match self.transition(seq_id, state, event) {
-            Ok(new_state) => {
-                self.sequences.insert(seq_id, new_state);
-            }
+        // On error the sequence manager restores the prior state; the scheduler
+        // only applies OOM policy.
+        match self.sequences.advance(seq_id, event) {
+            Ok(_) => {}
             Err(Error::OutOfMemory) => {
                 warn!("OOM while appending tokens to {:?}", seq_id);
-                self.sequences.insert(seq_id, backup);
                 self.handle_oom();
             }
             Err(e) => {
                 warn!("Failed to append tokens to {:?}: {:?}", seq_id, e);
-                self.sequences.insert(seq_id, backup);
             }
         }
     }
 
     pub fn complete_sequence(&mut self, seq_id: SequenceId, reason: FinishReason, result: String) {
-        let state = match self.sequences.remove(&seq_id) {
-            Some(s) => s,
-            None => {
-                warn!("Sequence {:?} not found", seq_id);
-                return;
-            }
-        };
-
-        let backup = state.clone();
-        let event = Event::Complete { reason };
-
-        match self.transition(seq_id, state, event) {
-            Ok(new_state) => {
+        match self.sequences.advance(seq_id, Event::Complete { reason }) {
+            Ok(_) => {
                 info!("Completed sequence {:?}", seq_id);
-                self.sequences.insert(seq_id, new_state);
 
                 // Remove from batches
                 self.prefill_batch.retain(|&id| id != seq_id);
@@ -271,7 +228,6 @@ impl Scheduler {
             }
             Err(e) => {
                 warn!("Failed to complete {:?}: {:?}", seq_id, e);
-                self.sequences.insert(seq_id, backup);
 
                 // Send error back to client
                 if let Some(response_tx) = self.response_channels.remove(&seq_id) {
@@ -282,68 +238,13 @@ impl Scheduler {
     }
 
     pub fn fork_sequence(&mut self, parent_id: SequenceId, child_id: SequenceId) {
-        // Check duplicate child_id
-        if self.sequences.contains_key(&child_id) {
-            warn!("Child ID {:?} already exists", child_id);
-            return;
-        }
-
-        let parent_state = match self.sequences.remove(&parent_id) {
-            Some(s) => s,
-            None => {
-                warn!("Parent sequence {:?} not found", parent_id);
-                return;
-            }
-        };
-
-        // TODO: Fork needs special handling - returns (parent, child)
-        // For now, use manual implementation
-        let backup = parent_state.clone();
-
-        if let SequenceState::Decoding(s) = parent_state {
-            // Copy-on-write: increment ref counts
-            for &block_id in s.blocks.iter() {
-                if let Err(e) = self.block_manager.add_ref(block_id) {
-                    warn!("Failed to fork {:?}: {:?}", parent_id, e);
-                    self.sequences.insert(parent_id, backup);
-                    return;
-                }
-            }
-
-            let child = DecodingState {
-                seq_id: child_id,
-                token_ids: Arc::clone(&s.token_ids),
-                blocks: Arc::clone(&s.blocks),
-                num_tokens: s.num_tokens,
-                max_tokens: s.max_tokens,
-            };
-
-            self.sequences.insert(parent_id, SequenceState::Decoding(s));
-            self.sequences
-                .insert(child_id, SequenceState::Decoding(child));
-            debug!("Forked sequence {:?} → {:?}", parent_id, child_id);
-        } else {
-            warn!("Cannot fork {:?} - not in Decoding state", parent_id);
-            self.sequences.insert(parent_id, backup);
-        }
+        let _ = self.sequences.fork(parent_id, child_id);
     }
 
     fn preempt_sequence(&mut self, seq_id: SequenceId) {
-        let state = match self.sequences.remove(&seq_id) {
-            Some(s) => s,
-            None => {
-                warn!("Sequence {:?} not found", seq_id);
-                return;
-            }
-        };
-
-        let backup = state.clone();
-        let event = Event::Preempt;
-
-        match self.transition(seq_id, state, event) {
-            Ok(new_state) => {
+        match self.sequences.advance(seq_id, Event::Preempt) {
+            Ok(_) => {
                 info!("Preempted sequence {:?}", seq_id);
-                self.sequences.insert(seq_id, new_state);
 
                 // Remove from batches
                 self.prefill_batch.retain(|&id| id != seq_id);
@@ -351,32 +252,18 @@ impl Scheduler {
             }
             Err(e) => {
                 warn!("Failed to preempt {:?}: {:?}", seq_id, e);
-                self.sequences.insert(seq_id, backup);
             }
         }
     }
 
     fn resume_sequence(&mut self, seq_id: SequenceId) {
-        let state = match self.sequences.remove(&seq_id) {
-            Some(s) => s,
-            None => {
-                warn!("Sequence {:?} not found", seq_id);
-                return;
-            }
-        };
-
-        let backup = state.clone();
-        let event = Event::Resume;
-
-        match self.transition(seq_id, state, event) {
-            Ok(new_state) => {
+        match self.sequences.advance(seq_id, Event::Resume) {
+            Ok(_) => {
                 debug!("Resumed sequence {:?}", seq_id);
-                self.sequences.insert(seq_id, new_state);
                 self.waiting_queue.push_back(seq_id);
             }
             Err(e) => {
                 warn!("Failed to resume {:?}: {:?}", seq_id, e);
-                self.sequences.insert(seq_id, backup);
             }
         }
     }
@@ -397,41 +284,27 @@ impl Scheduler {
                 break;
             }
 
-            // Get and remove state
-            let state = match self.sequences.remove(&seq_id) {
-                Some(s) => s,
-                None => {
-                    warn!("Sequence {:?} not found", seq_id);
-                    continue;
-                }
-            };
-
             let event = Event::Schedule {
                 tokens_per_block: self.tokens_per_block,
             };
 
-            match self.transition(seq_id, state.clone(), event) {
-                Ok(new_state) => {
-                    self.sequences.insert(seq_id, new_state);
+            // The sequence manager restores prior state on any error, so the
+            // scheduler only applies queueing policy.
+            match self.sequences.advance(seq_id, event) {
+                Ok(_) => {
                     self.prefill_batch.push(seq_id);
                     info!("Scheduled {:?} for prefill", seq_id);
                 }
                 Err(Error::OutOfMemory) => {
-                    // Transition already cleaned up allocated blocks
-                    // Restore state, put back in queue and stop
-                    self.sequences.insert(seq_id, state);
+                    // Put back at the front and stop scheduling this round.
                     self.waiting_queue.push_front(seq_id);
                     debug!("OOM - cannot schedule {:?}", seq_id);
                     break;
                 }
                 Err(Error::InvalidTransition(_)) => {
-                    // Not in Waiting state - restore and skip
-                    self.sequences.insert(seq_id, state);
                     warn!("Cannot schedule {:?} - not in Waiting state", seq_id);
                 }
                 Err(e) => {
-                    // Other error - restore state
-                    self.sequences.insert(seq_id, state);
                     warn!("Failed to schedule {:?}: {:?}", seq_id, e);
                 }
             }
@@ -458,363 +331,17 @@ impl Scheduler {
     // ===== Query Methods =====
 
     pub fn get_blocks(&self, seq_id: SequenceId) -> Result<Vec<BlockId>> {
-        match self.sequences.get(&seq_id) {
-            Some(state) => Ok(state.blocks().map(|b| b.to_vec()).unwrap_or_default()),
-            None => Err(Error::UnknownSequence(seq_id)),
-        }
+        self.sequences.blocks(seq_id)
     }
 
     pub fn get_stats(&self) -> SchedulerStats {
-        let num_running = self.sequences.values().filter(|s| s.is_running()).count();
-        let num_waiting = self.waiting_queue.len();
-        let num_preempted = self
-            .sequences
-            .values()
-            .filter(|s| matches!(s, SequenceState::Preempted(_)))
-            .count();
-
         SchedulerStats {
             num_sequences: self.sequences.len(),
-            num_running,
-            num_waiting,
-            num_preempted,
-            block_stats: self.block_manager.get_stats(),
+            num_running: self.sequences.num_running(),
+            num_waiting: self.waiting_queue.len(),
+            num_preempted: self.sequences.num_preempted(),
+            block_stats: self.sequences.block_stats(),
         }
-    }
-
-    // ===== FSM Transitions =====
-
-    /// Transition sequence state using FSM event - single entry point for all transitions
-    ///
-    /// This method provides an event-based abstraction over the internal transition methods.
-    ///
-    /// # Design
-    ///
-    /// **Public API**: Event-based for maintainability
-    /// - Single entry point makes it easy to add cross-cutting concerns (logging, metrics)
-    /// - Event enum can be serialized for debugging/replay
-    /// - Clean interface for callers
-    ///
-    /// **Internal Implementation**: Type-safe methods
-    /// - Private `transition_*()` methods enforce correct state types at compile time
-    /// - Called by this method after event dispatching
-    ///
-    /// # Arguments
-    ///
-    /// * `seq_id` - Sequence the event applies to
-    /// * `state` - Current sequence state (will be consumed)
-    /// * `event` - FSM event to apply
-    ///
-    /// # Returns
-    ///
-    /// The new state on success (the caller stores it in the sequence map), or
-    /// the error on failure so callers can handle rollback/OOM policy. This
-    /// function computes state only; it does not touch the sequence map or the
-    /// scheduling queues.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let event = Event::Schedule { tokens_per_block: 16 };
-    /// let new_state = self.transition(seq_id, state, event)?;
-    /// self.sequences.insert(seq_id, new_state);
-    /// ```
-    pub fn transition(
-        &mut self,
-        seq_id: SequenceId,
-        state: SequenceState,
-        event: Event,
-    ) -> Result<SequenceState> {
-        use crate::fsm::Event;
-
-        match (state, event) {
-            // Empty → Waiting (new sequence)
-            (
-                SequenceState::Empty,
-                Event::Create {
-                    token_ids,
-                    max_tokens,
-                },
-            ) => self.transition_create(seq_id, token_ids, max_tokens),
-
-            // Waiting → Prefilling
-            (SequenceState::Waiting(s), Event::Schedule { .. }) => self.transition_schedule(s),
-
-            // Prefilling → Prefilling/Decoding
-            (SequenceState::Prefilling(s), Event::AppendTokens { num_tokens, .. }) => {
-                self.transition_append_tokens_prefilling(s, num_tokens)
-            }
-
-            // Decoding → Decoding/Finished
-            (SequenceState::Decoding(s), Event::AppendTokens { num_tokens, .. }) => {
-                self.transition_append_tokens_decoding(s, num_tokens)
-            }
-
-            // Any running state → Finished
-            (state, Event::Complete { reason }) => self.transition_complete(state, reason),
-
-            // Running → Preempted
-            (
-                state @ (SequenceState::Prefilling(_) | SequenceState::Decoding(_)),
-                Event::Preempt,
-            ) => self.transition_preempt(state),
-
-            // Preempted → Waiting
-            (SequenceState::Preempted(s), Event::Resume) => self.transition_resume(s),
-
-            // Any → Aborted
-            (state, Event::Abort { reason }) => self.transition_abort(state, reason),
-
-            // Invalid transitions
-            _ => Err(Error::InvalidTransition("Invalid state transition")),
-        }
-    }
-
-    // ===== Internal Transition Methods =====
-    //
-    // These private methods implement the actual transition logic.
-    // Called by apply() after event dispatching.
-
-    /// Transition: Empty → Waiting (construct a new sequence's initial state)
-    fn transition_create(
-        &mut self,
-        seq_id: SequenceId,
-        token_ids: Vec<TokenId>,
-        max_tokens: usize,
-    ) -> Result<SequenceState> {
-        Ok(SequenceState::Waiting(WaitingState {
-            seq_id,
-            token_ids: Arc::new(token_ids),
-            max_tokens,
-        }))
-    }
-
-    /// Transition: Waiting → Prefilling (allocate blocks for tokenized prompt)
-    fn transition_schedule(&mut self, state: WaitingState) -> Result<SequenceState> {
-        let prompt_tokens = state.token_ids.len();
-        let blocks_needed = prompt_tokens.div_ceil(self.tokens_per_block);
-
-        let mut blocks = Vec::new();
-        for _ in 0..blocks_needed {
-            match self.block_manager.allocate() {
-                Ok(block_id) => blocks.push(block_id),
-                Err(Error::OutOfMemory) => {
-                    // Cleanup on OOM
-                    for block in blocks {
-                        let _ = self.block_manager.free(block);
-                    }
-                    return Err(Error::OutOfMemory);
-                }
-                Err(e) => {
-                    for block in blocks {
-                        let _ = self.block_manager.free(block);
-                    }
-                    return Err(e);
-                }
-            }
-        }
-
-        debug!(
-            "Scheduled seq {:?}: allocated {} blocks for {} tokens",
-            state.seq_id,
-            blocks.len(),
-            prompt_tokens
-        );
-
-        Ok(SequenceState::Prefilling(PrefillingState {
-            seq_id: state.seq_id,
-            token_ids: state.token_ids,
-            blocks: Arc::new(blocks),
-            tokens_filled: 0,
-            tokens_total: prompt_tokens,
-            max_tokens: state.max_tokens,
-        }))
-    }
-
-    /// Transition: Prefilling → Decoding or Prefilling (append tokens)
-    fn transition_append_tokens_prefilling(
-        &mut self,
-        mut state: PrefillingState,
-        num_tokens: usize,
-    ) -> Result<SequenceState> {
-        state.tokens_filled += num_tokens;
-
-        debug!(
-            "Prefilling seq {:?}: {}/{} tokens",
-            state.seq_id, state.tokens_filled, state.tokens_total
-        );
-
-        if state.tokens_filled >= state.tokens_total {
-            debug!("Seq {:?} transitioning to Decoding", state.seq_id);
-            Ok(SequenceState::Decoding(DecodingState {
-                seq_id: state.seq_id,
-                token_ids: state.token_ids,
-                blocks: state.blocks,
-                num_tokens: state.tokens_filled,
-                max_tokens: state.max_tokens,
-            }))
-        } else {
-            Ok(SequenceState::Prefilling(state))
-        }
-    }
-
-    /// Transition: Decoding → Decoding or Finished (append tokens, maybe allocate more blocks)
-    fn transition_append_tokens_decoding(
-        &mut self,
-        mut state: DecodingState,
-        num_tokens: usize,
-    ) -> Result<SequenceState> {
-        state.num_tokens += num_tokens;
-
-        // Check if finished
-        if state.num_tokens >= state.max_tokens {
-            // Free blocks
-            for &block_id in state.blocks.iter() {
-                if let Err(e) = self.block_manager.free(block_id) {
-                    warn!(
-                        "Failed to free block {:?} for {:?}: {:?}",
-                        block_id, state.seq_id, e
-                    );
-                }
-            }
-
-            debug!(
-                "Seq {:?} finished: reached max_tokens ({})",
-                state.seq_id, state.max_tokens
-            );
-
-            return Ok(SequenceState::Finished(FinishedState {
-                seq_id: state.seq_id,
-                finish_reason: FinishReason::MaxTokens,
-            }));
-        }
-
-        // Check if need more blocks
-        let blocks_needed = state.num_tokens.div_ceil(self.tokens_per_block);
-        let initial_block_count = state.blocks.len();
-
-        if state.blocks.len() < blocks_needed {
-            let blocks = Arc::make_mut(&mut state.blocks);
-
-            while blocks.len() < blocks_needed {
-                match self.block_manager.allocate() {
-                    Ok(block_id) => {
-                        blocks.push(block_id);
-                        debug!(
-                            "Seq {:?}: allocated block, total blocks: {}",
-                            state.seq_id,
-                            blocks.len()
-                        );
-                    }
-                    Err(e) => {
-                        warn!("Failed to allocate block for {:?}: {:?}", state.seq_id, e);
-                        for block_id in blocks.drain(initial_block_count..) {
-                            let _ = self.block_manager.free(block_id);
-                        }
-                        return Err(e);
-                    }
-                }
-            }
-        }
-
-        Ok(SequenceState::Decoding(state))
-    }
-
-    /// Transition: Prefilling/Decoding → Finished
-    fn transition_complete(
-        &mut self,
-        state: SequenceState,
-        reason: FinishReason,
-    ) -> Result<SequenceState> {
-        let seq_id = state.seq_id();
-
-        // Free blocks if any
-        if let Some(blocks) = state.blocks() {
-            for &block_id in blocks {
-                if let Err(e) = self.block_manager.free(block_id) {
-                    warn!(
-                        "Failed to free block {:?} for {:?}: {:?}",
-                        block_id, seq_id, e
-                    );
-                }
-            }
-        }
-
-        debug!("Completed seq {:?}: {:?}", seq_id, reason);
-
-        Ok(SequenceState::Finished(FinishedState {
-            seq_id,
-            finish_reason: reason,
-        }))
-    }
-
-    /// Transition: Prefilling/Decoding → Preempted (free blocks)
-    fn transition_preempt(&mut self, state: SequenceState) -> Result<SequenceState> {
-        let seq_id = state.seq_id();
-        let (token_ids, num_tokens, max_tokens) = match &state {
-            SequenceState::Prefilling(s) => {
-                (Arc::clone(&s.token_ids), s.tokens_filled, s.max_tokens)
-            }
-            SequenceState::Decoding(s) => (Arc::clone(&s.token_ids), s.num_tokens, s.max_tokens),
-            _ => {
-                return Err(Error::InvalidTransition(
-                    "Can only preempt Prefilling/Decoding",
-                ))
-            }
-        };
-
-        // Free blocks
-        if let Some(blocks) = state.blocks() {
-            for &block_id in blocks {
-                if let Err(e) = self.block_manager.free(block_id) {
-                    warn!(
-                        "Failed to free block {:?} for {:?}: {:?}",
-                        block_id, seq_id, e
-                    );
-                }
-            }
-        }
-
-        debug!("Preempted seq {:?}", seq_id);
-
-        Ok(SequenceState::Preempted(PreemptedState {
-            seq_id,
-            token_ids,
-            num_tokens,
-            max_tokens,
-        }))
-    }
-
-    /// Transition: Preempted → Waiting
-    fn transition_resume(&mut self, state: PreemptedState) -> Result<SequenceState> {
-        debug!("Resuming seq {:?}", state.seq_id);
-
-        Ok(SequenceState::Waiting(WaitingState {
-            seq_id: state.seq_id,
-            token_ids: state.token_ids,
-            max_tokens: state.max_tokens,
-        }))
-    }
-
-    /// Transition: Any → Aborted (free blocks, cleanup)
-    fn transition_abort(&mut self, state: SequenceState, reason: String) -> Result<SequenceState> {
-        let seq_id = state.seq_id();
-
-        // Free blocks if any
-        if let Some(blocks) = state.blocks() {
-            for &block_id in blocks {
-                if let Err(e) = self.block_manager.free(block_id) {
-                    warn!(
-                        "Failed to free block {:?} for {:?}: {:?}",
-                        block_id, seq_id, e
-                    );
-                }
-            }
-        }
-
-        warn!("Aborted seq {:?}: {}", seq_id, reason);
-
-        Ok(SequenceState::Aborted(AbortedState { seq_id, reason }))
     }
 
     // ===== Response Channel Helpers =====
@@ -895,7 +422,7 @@ mod tests {
         assert_eq!(scheduler.sequences.len(), 1);
         assert_eq!(scheduler.waiting_queue.len(), 1);
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Waiting(_))
         ));
     }
@@ -921,7 +448,7 @@ mod tests {
 
         // Should transition to Aborted
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Aborted(_))
         ));
         assert_eq!(scheduler.waiting_queue.len(), 0);
@@ -945,7 +472,7 @@ mod tests {
 
         // Should move to prefilling
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Prefilling(_))
         ));
         assert_eq!(scheduler.prefill_batch.len(), 1);
@@ -996,7 +523,7 @@ mod tests {
         assert_eq!(scheduler.prefill_batch.len(), 0);
         assert_eq!(scheduler.waiting_queue.len(), 1);
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Waiting(_))
         ));
     }
@@ -1013,7 +540,7 @@ mod tests {
 
         // Should transition to Decoding
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Decoding(_))
         ));
     }
@@ -1029,7 +556,7 @@ mod tests {
         // Append more tokens
         scheduler.append_tokens(SequenceId(1), 10);
 
-        if let Some(SequenceState::Decoding(state)) = scheduler.sequences.get(&SequenceId(1)) {
+        if let Some(SequenceState::Decoding(state)) = scheduler.sequences.get(SequenceId(1)) {
             assert_eq!(state.num_tokens, 110);
         } else {
             panic!("Expected Decoding state");
@@ -1049,7 +576,7 @@ mod tests {
 
         // Should transition to Finished
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Finished(_))
         ));
     }
@@ -1066,7 +593,7 @@ mod tests {
 
         // Should be Finished
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Finished(_))
         ));
         assert_eq!(scheduler.prefill_batch.len(), 0);
@@ -1083,10 +610,10 @@ mod tests {
         scheduler.fork_sequence(SequenceId(1), SequenceId(2));
 
         // Both should exist
-        assert!(scheduler.sequences.contains_key(&SequenceId(1)));
-        assert!(scheduler.sequences.contains_key(&SequenceId(2)));
+        assert!(scheduler.sequences.contains(SequenceId(1)));
+        assert!(scheduler.sequences.contains(SequenceId(2)));
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(2)),
+            scheduler.sequences.get(SequenceId(2)),
             Some(SequenceState::Decoding(_))
         ));
     }
@@ -1104,7 +631,7 @@ mod tests {
 
         // Original seq 2 should be unchanged (Waiting)
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(2)),
+            scheduler.sequences.get(SequenceId(2)),
             Some(SequenceState::Waiting(_))
         ));
     }
@@ -1121,7 +648,7 @@ mod tests {
 
         // Should be Preempted
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Preempted(_))
         ));
         assert_eq!(scheduler.decode_batch.len(), 0);
@@ -1140,7 +667,7 @@ mod tests {
 
         // Should be back to Waiting
         assert!(matches!(
-            scheduler.sequences.get(&SequenceId(1)),
+            scheduler.sequences.get(SequenceId(1)),
             Some(SequenceState::Waiting(_))
         ));
         assert_eq!(scheduler.waiting_queue.len(), 1);

@@ -77,3 +77,77 @@ impl MemoryAllocator for CpuAllocator {
 
 // TODO: Implement CudaAllocator later
 // pub struct CudaAllocator { ... }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_allocate_tracks_used_memory() {
+        let mut alloc = CpuAllocator::new(10_000);
+        assert_eq!(alloc.get_total_memory(), 10_000);
+        assert_eq!(alloc.get_available_memory(), 10_000);
+
+        let addr = alloc.allocate(1024).unwrap();
+        assert_eq!(addr.size, 1024);
+        assert!(!addr.ptr.is_null());
+        assert_eq!(alloc.get_available_memory(), 10_000 - 1024);
+
+        alloc.free(addr).unwrap();
+        assert_eq!(alloc.get_available_memory(), 10_000);
+    }
+
+    #[test]
+    fn test_allocate_out_of_memory() {
+        let mut alloc = CpuAllocator::new(1024);
+
+        // First allocation fits exactly.
+        let addr = alloc.allocate(1024).unwrap();
+        assert_eq!(alloc.get_available_memory(), 0);
+
+        // Any further allocation exceeds capacity.
+        assert!(matches!(alloc.allocate(1), Err(Error::OutOfMemory)));
+
+        alloc.free(addr).unwrap();
+    }
+
+    #[test]
+    fn test_allocate_exact_boundary() {
+        let mut alloc = CpuAllocator::new(2048);
+        let a = alloc.allocate(1024).unwrap();
+        let b = alloc.allocate(1024).unwrap();
+        assert_eq!(alloc.get_available_memory(), 0);
+        alloc.free(a).unwrap();
+        alloc.free(b).unwrap();
+        assert_eq!(alloc.get_available_memory(), 2048);
+    }
+
+    #[test]
+    fn test_free_more_than_used_errors() {
+        let mut alloc = CpuAllocator::new(10_000);
+        let addr = alloc.allocate(512).unwrap();
+
+        // Fabricate an address claiming a larger size than is actually used.
+        let bogus = MemoryAddress {
+            ptr: addr.ptr,
+            size: 4096,
+        };
+        assert!(matches!(alloc.free(bogus), Err(Error::FreeFailed(_))));
+
+        // The real allocation is still accounted for and can be freed.
+        assert_eq!(alloc.get_available_memory(), 10_000 - 512);
+        alloc.free(addr).unwrap();
+        assert_eq!(alloc.get_available_memory(), 10_000);
+    }
+
+    #[test]
+    fn test_reuse_after_free() {
+        let mut alloc = CpuAllocator::new(1024);
+        for _ in 0..3 {
+            let addr = alloc.allocate(1024).unwrap();
+            assert_eq!(alloc.get_available_memory(), 0);
+            alloc.free(addr).unwrap();
+            assert_eq!(alloc.get_available_memory(), 1024);
+        }
+    }
+}

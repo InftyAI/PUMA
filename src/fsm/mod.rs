@@ -8,7 +8,6 @@
 //!
 //! - `states`: State definitions (Waiting, Prefilling, Decoding, etc.)
 //! - `events`: Event types that trigger transitions
-//! - `transitions`: (DEPRECATED - logic moved to Scheduler)
 //!
 //! # Usage
 //!
@@ -38,7 +37,6 @@
 
 pub mod events;
 pub mod states;
-// pub mod transitions;  // DEPRECATED: logic moved to Scheduler
 
 // Re-export commonly used types
 pub use events::Event;
