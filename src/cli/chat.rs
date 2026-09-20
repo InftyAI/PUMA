@@ -5,7 +5,7 @@ use rustyline_derive::{Completer, Helper, Highlighter, Validator};
 use std::io::{self, Write};
 use tokio_stream::StreamExt;
 
-use crate::backend::EngineHandle;
+use crate::engine::EngineHandle;
 
 #[derive(Clone)]
 struct PlaceholderHint {

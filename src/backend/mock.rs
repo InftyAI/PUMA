@@ -3,7 +3,7 @@ use std::io;
 use std::pin::Pin;
 use tokio_stream::Stream;
 
-use super::engine::Backend;
+use super::Backend;
 use crate::block_manager::types::TokenId;
 
 /// Default vocab size the mock samples completion tokens from.
@@ -12,7 +12,7 @@ use crate::block_manager::types::TokenId;
 /// (so they decode to real text), large enough for varied output.
 const DEFAULT_VOCAB_SIZE: u32 = 1000;
 
-/// Mock inference engine that behaves like a real autoregressive model.
+/// Mock inference backend that behaves like a real autoregressive model.
 ///
 /// Unlike a naive echo, this consumes the prompt as *context* and emits only
 /// **new** completion tokens — never the prompt back. Tokens are produced by a
@@ -23,11 +23,11 @@ const DEFAULT_VOCAB_SIZE: u32 = 1000;
 ///
 /// Generation stops at `max_tokens` (the mock has no EOS concept yet).
 #[derive(Clone)]
-pub struct MockEngine {
+pub struct MockBackend {
     vocab_size: u32,
 }
 
-impl MockEngine {
+impl MockBackend {
     pub fn new() -> Self {
         Self {
             vocab_size: DEFAULT_VOCAB_SIZE,
@@ -73,7 +73,7 @@ fn hash_tokens(tokens: &[TokenId]) -> u64 {
     hash
 }
 
-impl Backend for MockEngine {
+impl Backend for MockBackend {
     async fn generate(
         &self,
         token_ids: Vec<TokenId>,
@@ -101,7 +101,7 @@ impl Backend for MockEngine {
     }
 }
 
-impl Default for MockEngine {
+impl Default for MockBackend {
     fn default() -> Self {
         Self::new()
     }
@@ -113,9 +113,9 @@ mod tests {
 
     #[tokio::test]
     async fn returns_only_completion_tokens() {
-        let engine = MockEngine::new();
+        let backend = MockBackend::new();
         let prompt = vec![5, 9, 2];
-        let out = engine.generate(prompt.clone(), 4, 0.0).await.unwrap();
+        let out = backend.generate(prompt.clone(), 4, 0.0).await.unwrap();
         // Completion-only: exactly max_tokens, and it does not start with the
         // prompt (a real model returns a continuation, not an echo).
         assert_eq!(out.len(), 4);
@@ -124,24 +124,24 @@ mod tests {
 
     #[tokio::test]
     async fn is_deterministic() {
-        let engine = MockEngine::new();
-        let a = engine.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
-        let b = engine.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
+        let backend = MockBackend::new();
+        let a = backend.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
+        let b = backend.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
         assert_eq!(a, b, "same prompt must yield same completion");
     }
 
     #[tokio::test]
     async fn is_input_dependent() {
-        let engine = MockEngine::new();
-        let a = engine.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
-        let b = engine.generate(vec![3, 2, 1], 8, 0.0).await.unwrap();
+        let backend = MockBackend::new();
+        let a = backend.generate(vec![1, 2, 3], 8, 0.0).await.unwrap();
+        let b = backend.generate(vec![3, 2, 1], 8, 0.0).await.unwrap();
         assert_ne!(a, b, "different prompts should yield different completions");
     }
 
     #[tokio::test]
     async fn tokens_stay_within_vocab() {
-        let engine = MockEngine::with_vocab_size(50);
-        let out = engine.generate(vec![7, 7, 7], 32, 0.0).await.unwrap();
+        let backend = MockBackend::with_vocab_size(50);
+        let out = backend.generate(vec![7, 7, 7], 32, 0.0).await.unwrap();
         assert!(
             out.iter().all(|&t| t < 50),
             "ids must be within vocab range"
@@ -150,11 +150,11 @@ mod tests {
 
     #[tokio::test]
     async fn stream_matches_generate() {
-        let engine = MockEngine::new();
+        let backend = MockBackend::new();
         let prompt = vec![10, 20, 30];
-        let batched = engine.generate(prompt.clone(), 6, 0.0).await.unwrap();
+        let batched = backend.generate(prompt.clone(), 6, 0.0).await.unwrap();
         let mut streamed = Vec::new();
-        let mut s = engine.generate_stream(prompt, 6, 0.0).await.unwrap();
+        let mut s = backend.generate_stream(prompt, 6, 0.0).await.unwrap();
         while let Some(tok) = s.next().await {
             streamed.push(tok);
         }

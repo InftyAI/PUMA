@@ -5,9 +5,8 @@ use tokenizers::Tokenizer;
 use tracing::{debug, info};
 
 use crate::api::routes::create_router;
-use crate::backend::engine;
-use crate::backend::mock::MockEngine;
-use crate::backend::EngineConfig;
+use crate::backend::mock::MockBackend;
+use crate::engine::{self, EngineConfig};
 use crate::registry::model_registry::ModelRegistry;
 
 /// Execute the serve command
@@ -34,15 +33,15 @@ pub async fn execute(
     );
     info!("Starting PUMA to serve model: {}", model_name);
 
-    // Initialize backend (MockEngine for now, replace with MLX later)
-    let backend = MockEngine::new();
-    debug!("Using MockEngine backend");
+    // Initialize backend (MockBackend for now, replace with MLX later)
+    let backend = MockBackend::new();
+    debug!("Using MockBackend backend");
 
     // TODO: Load the model's real tokenizer; placeholder BPE for now
     let tokenizer = Tokenizer::new(BPE::default());
 
     // Create engine: cheap send-side handle + runner that owns the scheduler
-    let (handle, runner) = engine(backend, tokenizer, model_name.to_string(), config);
+    let (handle, runner) = engine::spawn(backend, tokenizer, model_name.to_string(), config);
 
     // Spawn the runner's event loop; the handle submits work via events
     tokio::spawn(runner.serve());

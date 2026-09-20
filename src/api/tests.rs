@@ -13,16 +13,16 @@ use tempfile::TempDir;
 use tower::util::ServiceExt; // for `oneshot` and `ready`
 
 use super::routes::create_router;
-use crate::backend::mock::MockEngine;
-use crate::backend::{engine, EngineConfig};
+use crate::backend::mock::MockBackend;
+use crate::engine::{self, EngineConfig};
 use crate::registry::model_registry::{CacheInfo, ModelInfo, ModelMetadata, ModelRegistry};
 
 /// Helper to create test app with a pre-registered test model
 /// Returns the router and the temp directory (which must be kept alive)
 fn create_test_app() -> (axum::Router, TempDir) {
     // Build the engine and spawn its runner; the handle drives the router
-    let (handle, runner) = engine(
-        MockEngine::new(),
+    let (handle, runner) = engine::spawn(
+        MockBackend::new(),
         create_test_tokenizer(),
         "test-model".to_string(),
         EngineConfig::default(),

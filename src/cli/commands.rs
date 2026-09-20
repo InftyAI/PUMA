@@ -4,10 +4,10 @@ use prettytable::{format, row, Table};
 
 use tokenizers::Tokenizer;
 
-use crate::backend::mock::MockEngine;
-use crate::backend::{engine, EngineConfig};
+use crate::backend::mock::MockBackend;
 use crate::cli::{chat, inspect, ls, rm};
 use crate::downloader::{self, Provider};
+use crate::engine::{self, EngineConfig};
 use crate::registry::model_registry::ModelRegistry;
 use crate::system::system_info::SystemInfo;
 use crate::utils::format::{format_size_decimal, format_time_ago};
@@ -315,12 +315,12 @@ pub async fn run(cli: Cli) {
             };
 
             // Load inference backend
-            // TODO: Replace MockEngine with real backend that loads model files
+            // TODO: Replace MockBackend with real backend that loads model files
             // Real backend will use: registry.get_model(&args.model)?.metadata.cache.path
-            let backend = MockEngine::new();
+            let backend = MockBackend::new();
 
             // Create engine: cheap send-side handle + runner that owns the scheduler
-            let (handle, runner) = engine(
+            let (handle, runner) = engine::spawn(
                 backend,
                 tokenizer,
                 args.model.clone(),

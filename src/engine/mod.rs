@@ -5,7 +5,7 @@ use tokenizers::Tokenizer;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
-use super::engine::Backend;
+use crate::backend::Backend;
 use crate::block_manager::allocator::CpuAllocator;
 use crate::block_manager::manager::BlockManager;
 use crate::block_manager::types::{SequenceId, TokenId};
@@ -345,11 +345,11 @@ fn stream_flush(decoded: &str, sent_len: usize) -> Option<&str> {
 
 /// Tunable engine parameters.
 ///
-/// These were previously hardcoded inside [`engine`]. Construct via
+/// These were previously hardcoded inside [`spawn`]. Construct via
 /// [`EngineConfig::default`] and override fields as needed:
 ///
 /// ```
-/// # use puma::backend::llm_engine::EngineConfig;
+/// # use puma::engine::EngineConfig;
 /// let cfg = EngineConfig { max_batch_size: 64, ..Default::default() };
 /// ```
 #[derive(Debug, Clone)]
@@ -397,7 +397,7 @@ impl Default for EngineConfig {
 /// to tune memory/batching. Spawn `runner.serve()` on a task and share the
 /// returned handle with the API / CLI. All request submission goes through
 /// events, so the handle never touches the scheduler directly.
-pub fn engine<B: Backend + Clone + 'static>(
+pub fn spawn<B: Backend + Clone + 'static>(
     backend: B,
     tokenizer: Tokenizer,
     model: String,
@@ -440,7 +440,7 @@ pub fn engine<B: Backend + Clone + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::mock::MockEngine;
+    use crate::backend::mock::MockBackend;
 
     fn create_test_tokenizer() -> Tokenizer {
         use tokenizers::models::bpe::BPE;
@@ -451,10 +451,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_llm_engine() {
-        let backend = MockEngine::new();
+    async fn test_engine_spawn() {
+        let backend = MockBackend::new();
         let tokenizer = create_test_tokenizer();
-        let (handle, runner) = engine(
+        let (handle, runner) = spawn(
             backend,
             tokenizer,
             "test-model".to_string(),
