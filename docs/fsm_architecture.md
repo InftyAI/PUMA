@@ -207,7 +207,7 @@ PUMA uses a two-level event system (inspired by TokenSpeed):
 - `src/sequence_manager/mod.rs` - Owns memory + FSM transition logic (`advance()`)
 - `src/scheduler/core.rs` - Scheduling policy that drives the SequenceManager
 - `src/scheduler/events.rs` - External scheduler events
-- `src/backend/llm_engine.rs` - Event coordinator
+- `src/engine/mod.rs` - Event coordinator
 
 ## Usage Example
 

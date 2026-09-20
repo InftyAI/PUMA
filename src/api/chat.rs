@@ -15,7 +15,7 @@ use crate::api::types::{
     ChatChoice, ChatChoiceDelta, ChatCompletionChunk, ChatCompletionRequest,
     ChatCompletionResponse, ChatMessage, ChatMessageDelta, ErrorResponse, Usage,
 };
-use crate::backend::EngineHandle;
+use crate::engine::EngineHandle;
 
 /// Main handler for chat completions
 pub async fn chat_completions(

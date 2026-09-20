@@ -33,4 +33,4 @@ puma run qwen/qwen2.5-0.5b --tokens-per-block 32
 - **`--default-max-tokens`** only applies when a request omits `max_tokens`; an
   explicit per-request `max_tokens` always takes precedence.
 - The flag defaults are sourced from `EngineConfig` in
-  `src/backend/llm_engine.rs`, so the CLI and the library stay in sync.
+  `src/engine/mod.rs`, so the CLI and the library stay in sync.
